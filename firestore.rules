@@ -1,9 +1,0 @@
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Só usuários logados leem/escrevem a agenda (compartilhada entre os autorizados)
-    match /app_state/{doc} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
