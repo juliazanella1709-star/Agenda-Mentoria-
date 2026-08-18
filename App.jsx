@@ -5,8 +5,9 @@ import {
   Users, Wallet, TrendingUp, List, Clock, RotateCcw, PhoneCall, MessageCircle, Package, Minus, Eye, EyeOff, LogOut,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
-import { supabase } from "./supabaseClient";
-import { store } from "./lib/store";
+import { auth as fbAuth } from "./firebase";
+import { store } from "./store";
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 
 // ---- Tema ------------------------------------------------------------------
 const C = {
@@ -69,11 +70,16 @@ const toNum = (s) => {
 };
 const brl = (v) => toNum(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const igHandle = (s) => (s || "").replace(/^@+/, "");
+const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" + ");
+const procsText = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" ");
 const initials = (name) => (name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase() || "?";
 
 const valorDe = (it) => toNum(it.valor);
-const recebidoDe = (it) => { const v = toNum(it.valor), s = toNum(it.sinal); return v > 0 ? Math.min(s, v) : s; };
-const saldoDe = (it) => Math.max(valorDe(it) - toNum(it.sinal), 0);
+const pagList = (it) => (it.pagamentos && it.pagamentos.length) ? it.pagamentos : (toNum(it.sinal) > 0 ? [{ valor: it.sinal, forma: it.formaPgto, conta: it.sinalPara, parcelas: it.parcelas }] : []);
+const pagResumo = (it) => pagList(it).filter((p) => toNum(p.valor) > 0).map((p) => `${p.forma || "?"}${p.conta ? " " + p.conta : ""}`).join(" + ");
+const totalPagoDe = (it) => pagList(it).reduce((s, p) => s + toNum(p.valor), 0);
+const recebidoDe = (it) => { const v = valorDe(it), pg = totalPagoDe(it); return v > 0 ? Math.min(pg, v) : pg; };
+const saldoDe = (it) => Math.max(valorDe(it) - totalPagoDe(it), 0);
 
 function derivePatients(items, people = []) {
   const map = {};
@@ -133,7 +139,7 @@ function last6Months(items, ym) {
 function topProcs(items, ym) {
   const map = {};
   items.filter((it) => ymOf(it.date) === ym && it.status !== "cancelado" && valorDe(it) > 0)
-    .forEach((it) => { const p = it.procedure || "Sem procedimento"; map[p] = (map[p] || 0) + valorDe(it); });
+    .forEach((it) => { const p = procsLabel(it) || "Sem procedimento"; map[p] = (map[p] || 0) + valorDe(it); });
   return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
 }
 
@@ -159,7 +165,7 @@ function deriveRetornos(items) {
     if (it.status === "cancelado") continue;
     const key = (it.patient || "").trim().toLowerCase();
     if (!key) continue;
-    const c = catDe(it.procedure);
+    const c = catDe(procsText(it));
     if (!c.botox && !c.harmo) continue;
     if (!map[key]) map[key] = { name: it.patient.trim(), phone: "", instagram: "" };
     const m = map[key];
@@ -192,7 +198,7 @@ function deriveChamar(items) {
     if (it.status === "cancelado") continue;
     const key = (it.patient || "").trim().toLowerCase();
     if (!key) continue;
-    const p = (it.procedure || "").toLowerCase();
+    const p = procsText(it).toLowerCase();
     for (const r of RECALL) {
       if (!r.re.test(p)) continue;
       if (!map[key]) map[key] = { name: it.patient.trim(), phone: "", instagram: "", cats: {} };
@@ -234,6 +240,7 @@ export default function App() {
   const [dayMode, setDayMode] = useState("lista");
   const [historyPatient, setHistoryPatient] = useState(null);
   const [agendaView, setAgendaView] = useState("dia");
+  const [weekSpan, setWeekSpan] = useState(3);
   const [notas, setNotas] = useState([]);
   const [people, setPeople] = useState([]);
   const [patientForm, setPatientForm] = useState(null);
@@ -269,7 +276,6 @@ export default function App() {
       try { const r = await store.get(NOTES_KEY); if (r && r.value) setNotas(JSON.parse(r.value)); } catch (_) {}
       try { const r = await store.get(PEOPLE_KEY); if (r && r.value) setPeople(JSON.parse(r.value)); } catch (_) {}
       try { const r = await store.get(STOCK_KEY); if (r && r.value) setEstoque(JSON.parse(r.value)); } catch (_) {}
-      try { const { data } = await supabase.auth.getSession(); if (data && data.session) setAuth(data.session.user.email); } catch (_) {}
       setLoading(false);
     })();
   }, []);
@@ -307,18 +313,18 @@ export default function App() {
     const next = data.id ? people.map((p) => (p.id === data.id ? data : p)) : [...people, { ...data, id: uid() }];
     persistPeople(next); setPatientForm(null); flash("Paciente cadastrado.");
   };
-  const weekShift = (dir) => { const d = parseKey(selected); d.setDate(d.getDate() + dir * 7); setSelected(keyOf(d)); setCursor({ y: d.getFullYear(), m: d.getMonth() }); };
+  const weekShift = (dir) => { const d = parseKey(selected); d.setDate(d.getDate() + dir * (weekSpan >= 7 ? 7 : weekSpan)); setSelected(keyOf(d)); setCursor({ y: d.getFullYear(), m: d.getMonth() }); };
   const persistEstoque = async (next) => { setEstoque(next); try { await store.set(STOCK_KEY, JSON.stringify(next)); } catch (_) {} };
   const addEstoque = (it) => persistEstoque([...estoque, { ...it, id: uid() }]);
   const setEstoqueQtd = (id, qtd) => persistEstoque(estoque.map((i) => (i.id === id ? { ...i, qtd: Math.max(0, qtd) } : i)));
   const delEstoque = (id) => persistEstoque(estoque.filter((i) => i.id !== id));
   const saveEstoqueItem = (data) => { persistEstoque(estoque.map((i) => (i.id === data.id ? data : i))); setEstoqueForm(null); };
   const login = async (email, senha) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email: (email || "").trim(), password: senha });
-    if (error || !data.user) return false;
-    setAuth(data.user.email); return true;
+    try { const cred = await signInWithEmailAndPassword(fbAuth, (email || "").trim(), senha); setAuth(cred.user.email); return true; }
+    catch (_) { return false; }
   };
-  const logout = async () => { await supabase.auth.signOut(); setAuth(null); };
+  const logout = async () => { await signOut(fbAuth); setAuth(null); };
+  useEffect(() => { const unsub = onAuthStateChanged(fbAuth, (u) => setAuth(u ? u.email : null)); return () => unsub(); }, []);
 
   const countByDate = useMemo(() => {
     const m = {};
@@ -435,16 +441,24 @@ export default function App() {
                   ))}
                 </div>
                 {agendaView === "semana" && (
-                  <div className="flex items-center gap-2">
-                    <IconBtn onClick={() => weekShift(-1)}><ChevronLeft size={17} /></IconBtn>
-                    <div className="text-sm font-medium capitalize" style={{ color: C.ink, minWidth: 150, textAlign: "center" }}>{weekLabel(selected)}</div>
-                    <IconBtn onClick={() => weekShift(1)}><ChevronRight size={17} /></IconBtn>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex rounded-lg p-0.5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+                      {[[3, "3 dias"], [7, "7 dias"]].map(([v, l]) => (
+                        <button key={v} onClick={() => setWeekSpan(v)} className="text-xs rounded-md px-3 py-1.5 font-medium"
+                                style={{ background: weekSpan === v ? C.ink : "transparent", color: weekSpan === v ? "#fff" : C.muted }}>{l}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <IconBtn onClick={() => weekShift(-1)}><ChevronLeft size={17} /></IconBtn>
+                      <div className="text-sm font-medium capitalize" style={{ color: C.ink, minWidth: 120, textAlign: "center" }}>{weekLabel(selected, weekSpan)}</div>
+                      <IconBtn onClick={() => weekShift(1)}><ChevronRight size={17} /></IconBtn>
+                    </div>
                   </div>
                 )}
               </div>
 
               {agendaView === "semana" ? (
-                <WeekView selected={selected} items={items} onOpen={(it) => setModal(it)} onDay={(k) => { setSelected(k); setAgendaView("dia"); }} />
+                <WeekView selected={selected} span={weekSpan} items={items} onOpen={(it) => setModal(it)} onDay={(k) => { setSelected(k); setAgendaView("dia"); }} />
               ) : (
               <div className="grid gap-6" style={{ gridTemplateColumns: "minmax(0,340px) minmax(0,1fr)" }}>
               <section className="rounded-2xl p-4 h-fit" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
@@ -638,7 +652,7 @@ function Card({ it, onEdit, onDelete, onStatus }) {
   const [confirm, setConfirm] = useState(false);
   const s = STATUS[it.status] || STATUS.pendente;
   const dim = it.status === "cancelado";
-  const valor = toNum(it.valor), sinal = toNum(it.sinal), saldo = valor - sinal;
+  const valor = toNum(it.valor), pago = totalPagoDe(it), saldo = valor - pago;
 
   return (
     <div className="ag-fade rounded-2xl p-4 flex gap-4 group"
@@ -655,7 +669,7 @@ function Card({ it, onEdit, onDelete, onStatus }) {
             <div className="font-semibold truncate flex items-center gap-1.5" style={{ color: C.ink }}>
               <User size={14} color={C.faint} /> {it.patient}
             </div>
-            {it.procedure && <div className="text-sm mt-0.5 truncate" style={{ color: C.teal }}>{it.procedure}</div>}
+            {procsLabel(it) && <div className="text-sm mt-0.5 truncate" style={{ color: C.teal }}>{procsLabel(it)}</div>}
           </div>
           <StatusPill status={it.status} onChange={(v) => onStatus(it.id, v)} />
         </div>
@@ -676,10 +690,10 @@ function Card({ it, onEdit, onDelete, onStatus }) {
 
         {valor > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            <span className="text-xs rounded-md px-2 py-1 font-medium" style={{ background: C.tealSoft, color: C.money }}>{brl(valor)}{it.parcelas > 1 ? ` · ${it.parcelas}x` : ""}</span>
-            {sinal > 0 && <span className="text-xs rounded-md px-2 py-1" style={{ background: C.bg, color: C.muted }}>sinal {brl(sinal)}{(it.formaPgto || it.sinalPara) ? ` · ${[it.formaPgto, it.sinalPara].filter(Boolean).join(" ")}` : ""}</span>}
+            <span className="text-xs rounded-md px-2 py-1 font-medium" style={{ background: C.tealSoft, color: C.money }}>{brl(valor)}</span>
+            {pago > 0 && <span className="text-xs rounded-md px-2 py-1" style={{ background: C.bg, color: C.muted }}>pago {brl(pago)}{pagResumo(it) ? ` · ${pagResumo(it)}` : ""}</span>}
             {saldo > 0 && <span className="text-xs rounded-md px-2 py-1" style={{ background: C.coralSoft, color: C.coral }}>resta {brl(saldo)}</span>}
-            {saldo <= 0 && valor > 0 && <span className="text-xs rounded-md px-2 py-1 flex items-center gap-1" style={{ background: C.goodBg, color: C.goodFg }}><Check size={11} /> pago</span>}
+            {saldo <= 0 && valor > 0 && <span className="text-xs rounded-md px-2 py-1 flex items-center gap-1" style={{ background: C.goodBg, color: C.goodFg }}><Check size={11} /> quitado</span>}
           </div>
         )}
 
@@ -727,7 +741,7 @@ function SearchView({ results, onPick, onOpen }) {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate" style={{ color: C.ink }}>{it.patient}</div>
                   <div className="text-xs truncate" style={{ color: C.muted }}>
-                    {it.time}{it.endTime ? `–${it.endTime}` : ""} · {it.procedure || "—"} {it.instagram ? `· @${igHandle(it.instagram)}` : ""} {toNum(it.valor) > 0 ? `· ${brl(it.valor)}` : ""}
+                    {it.time}{it.endTime ? `–${it.endTime}` : ""} · {procsLabel(it) || "—"} {it.instagram ? `· @${igHandle(it.instagram)}` : ""} {toNum(it.valor) > 0 ? `· ${brl(it.valor)}` : ""}
                   </div>
                 </div>
                 <span className="text-xs rounded-full px-2.5 py-1 shrink-0" style={{ background: s.bg, color: s.fg }}>{s.label}</span>
@@ -846,7 +860,7 @@ function PaymentsView({ items, query, onEdit }) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate" style={{ color: C.ink }}>{it.patient}</div>
-                  <div className="text-xs truncate" style={{ color: C.muted }}>{it.procedure || "—"} · {brl(it.valor)}{it.parcelas > 1 ? ` ${it.parcelas}x` : ""}{toNum(it.sinal) > 0 ? ` · sinal ${brl(it.sinal)}` : ""}{(it.formaPgto || it.sinalPara) ? ` (${[it.formaPgto, it.sinalPara].filter(Boolean).join(" ")})` : ""}</div>
+                  <div className="text-xs truncate" style={{ color: C.muted }}>{procsLabel(it) || "—"} · {brl(it.valor)}{totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}</div>
                 </div>
                 {quit ? (
                   <span className="text-xs rounded-full px-2.5 py-1 shrink-0 flex items-center gap-1" style={{ background: C.goodBg, color: C.goodFg }}><Check size={11} /> quitado</span>
@@ -874,13 +888,15 @@ function BillingView({ items }) {
     const list = items.filter((it) => ymOf(it.date) === ym && it.status !== "cancelado");
     const map = {};
     for (const it of list) {
-      const rec = recebidoDe(it);
-      if (rec <= 0) continue;
-      const conta = it.sinalPara || "Sem conta";
-      const via = it.formaPgto || "Outro";
-      if (!map[conta]) map[conta] = { total: 0, vias: {} };
-      map[conta].total += rec;
-      map[conta].vias[via] = (map[conta].vias[via] || 0) + rec;
+      for (const p of pagList(it)) {
+        const rec = toNum(p.valor);
+        if (rec <= 0) continue;
+        const conta = p.conta || "Sem conta";
+        const via = p.forma || "Outro";
+        if (!map[conta]) map[conta] = { total: 0, vias: {} };
+        map[conta].total += rec;
+        map[conta].vias[via] = (map[conta].vias[via] || 0) + rec;
+      }
     }
     return Object.entries(map).sort((a, b) => b[1].total - a[1].total);
   }, [items, ym]);
@@ -1042,7 +1058,7 @@ function DayTimeline({ dayList, onOpen }) {
                                overflow: "hidden", textAlign: "left", opacity: cancel ? 0.55 : 1 }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: C.ink, opacity: 0.7, lineHeight: 1.15 }}>{ev.time}{ev.endTime ? `–${ev.endTime}` : ""}</div>
                 <div className="truncate" style={{ fontSize: 12, fontWeight: 600, color: C.ink, lineHeight: 1.25 }}>{ev.patient}</div>
-                {height > 46 && ev.procedure && <div className="truncate" style={{ fontSize: 11, color: C.muted, lineHeight: 1.2 }}>{ev.procedure}</div>}
+                {height > 46 && procsLabel(ev) && <div className="truncate" style={{ fontSize: 11, color: C.muted, lineHeight: 1.2 }}>{procsLabel(ev)}</div>}
               </button>
             );
           })}
@@ -1248,12 +1264,12 @@ function PatientHistory({ name, items, onClose, onAgendar, onOpenConsulta }) {
                   <div className="text-sm font-semibold" style={{ color: C.ink }}>{shortDate(it.date)}/{parseKey(it.date).getFullYear()} · {it.time}</div>
                   <span className="text-xs rounded-full px-2 py-0.5 shrink-0" style={{ background: s.bg, color: s.fg }}>{s.label}</span>
                 </div>
-                {it.procedure && <div className="text-sm mt-0.5" style={{ color: C.teal }}>{it.procedure}</div>}
+                {procsLabel(it) && <div className="text-sm mt-0.5" style={{ color: C.teal }}>{procsLabel(it)}</div>}
                 {valorDe(it) > 0 && (
                   <div className="text-xs mt-1" style={{ color: C.muted }}>
-                    {brl(it.valor)}{it.parcelas > 1 ? ` em ${it.parcelas}x` : ""}
-                    {toNum(it.sinal) > 0 ? ` · sinal ${brl(it.sinal)}` : ""}{(it.formaPgto || it.sinalPara) ? ` · ${[it.formaPgto, it.sinalPara].filter(Boolean).join(" ")}` : ""}
-                    {saldoC > 0 ? ` · resta ${brl(saldoC)}` : " · pago"}
+                    {brl(it.valor)}
+                    {totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}
+                    {saldoC > 0 ? ` · resta ${brl(saldoC)}` : " · quitado"}
                   </div>
                 )}
                 {it.aviso && <div className="text-xs mt-1" style={{ color: C.warnFg }}>⚠ {it.aviso}</div>}
@@ -1266,47 +1282,99 @@ function PatientHistory({ name, items, onClose, onAgendar, onOpenConsulta }) {
   );
 }
 
-const weekLabel = (selKey) => {
-  const base = parseKey(selKey); const start = new Date(base); start.setDate(base.getDate() - base.getDay());
-  const end = new Date(start); end.setDate(start.getDate() + 6);
+const weekLabel = (selKey, span = 7) => {
+  const base = parseKey(selKey);
+  let start, end;
+  if (span >= 7) { start = new Date(base); start.setDate(base.getDate() - base.getDay()); end = new Date(start); end.setDate(start.getDate() + 6); }
+  else { start = new Date(base); end = new Date(base); end.setDate(base.getDate() + span - 1); }
   const mesA = MESES[start.getMonth()].slice(0, 3).toLowerCase(); const mesB = MESES[end.getMonth()].slice(0, 3).toLowerCase();
   return start.getMonth() === end.getMonth()
     ? `${start.getDate()} – ${end.getDate()} ${mesB}`
     : `${start.getDate()} ${mesA} – ${end.getDate()} ${mesB}`;
 };
 
-function WeekView({ selected, items, onOpen, onDay }) {
-  const base = parseKey(selected); const start = new Date(base); start.setDate(base.getDate() - base.getDay());
-  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return keyOf(d); });
+function WeekView({ selected, span = 3, items, onOpen, onDay }) {
+  const wide = span <= 3;
+  const HOUR_PX = wide ? 66 : 54, GUTTER = 46, DAY_MIN = wide ? 152 : 104;
+  const base = parseKey(selected);
+  let days;
+  if (span >= 7) {
+    const start = new Date(base); start.setDate(base.getDate() - base.getDay());
+    days = Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return keyOf(d); });
+  } else {
+    days = Array.from({ length: span }, (_, i) => { const d = new Date(base); d.setDate(base.getDate() + i); return keyOf(d); });
+  }
+
+  const byDay = {}; for (const k of days) byDay[k] = [];
+  let minStart = 8 * 60, maxEnd = 19 * 60;
+  for (const it of items) {
+    if (!byDay[it.date]) continue;
+    const [sh, sm] = it.time.split(":").map(Number);
+    const startMin = sh * 60 + sm;
+    let endMin = startMin + 60;
+    if (it.endTime) { const [eh, em] = it.endTime.split(":").map(Number); endMin = eh * 60 + em; }
+    if (endMin <= startMin) endMin = startMin + 30;
+    minStart = Math.min(minStart, startMin); maxEnd = Math.max(maxEnd, endMin);
+    byDay[it.date].push({ ...it, startMin, endMin });
+  }
+  const startHour = Math.floor(minStart / 60), endHour = Math.ceil(maxEnd / 60);
+  const rangeStart = startHour * 60, totalMin = (endHour - startHour) * 60, PPM = HOUR_PX / 60;
+  const hours = []; for (let h = startHour; h <= endHour; h++) hours.push(h);
+
   return (
-    <div className="ag-fade grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
-      {days.map((k) => {
-        const list = items.filter((it) => it.date === k).sort((a, b) => a.time.localeCompare(b.time));
-        const d = parseKey(k); const isToday = k === todayKey(); const isSel = k === selected;
-        return (
-          <div key={k} className="rounded-xl p-2" style={{ background: C.surface, border: `1px solid ${isSel ? C.coral : C.line}`, minHeight: 120 }}>
-            <button onClick={() => onDay(k)} className="w-full text-left mb-2 px-1">
-              <div className="text-xs" style={{ color: C.faint }}>{DIAS[d.getDay()]}</div>
-              <div className="ff-d text-lg" style={{ fontWeight: 600, color: isToday ? C.coral : C.ink }}>{d.getDate()}</div>
-            </button>
-            <div className="space-y-1">
-              {list.length === 0 ? (
-                <div className="text-xs px-1 py-1" style={{ color: C.faint }}>—</div>
-              ) : list.map((it) => {
-                const s = STATUS[it.status] || STATUS.pendente;
+    <div className="ag-fade rounded-2xl" style={{ background: C.surface, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ minWidth: GUTTER + days.length * DAY_MIN }}>
+          <div className="flex" style={{ borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ width: GUTTER, flexShrink: 0 }} />
+            {days.map((k) => {
+              const d = parseKey(k); const isToday = k === todayKey(); const isSel = k === selected;
+              const n = byDay[k].filter((x) => x.status !== "cancelado").length;
+              return (
+                <button key={k} onClick={() => onDay(k)} className="text-center py-2" style={{ flex: 1, minWidth: DAY_MIN, background: isSel ? C.bg : "transparent", borderLeft: `1px solid ${C.line}` }}>
+                  <div className="text-xs" style={{ color: C.faint, textTransform: "uppercase", letterSpacing: 0.5 }}>{DIAS[d.getDay()]}</div>
+                  <div className="ff-d mx-auto flex items-center justify-center" style={{ width: 27, height: 27, borderRadius: 14, fontWeight: 600, fontSize: 14, background: isToday ? C.coral : "transparent", color: isToday ? "#fff" : C.ink }}>{d.getDate()}</div>
+                  <div className="text-xs mt-0.5" style={{ color: n > 0 ? C.muted : "transparent" }}>{n > 0 ? (wide ? `${n} atend.` : n) : "0"}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ position: "relative", height: totalMin * PPM + 6 }}>
+            {hours.map((h) => {
+              const top = (h * 60 - rangeStart) * PPM;
+              return (
+                <div key={h} style={{ position: "absolute", top, left: 0, right: 0 }}>
+                  <div style={{ position: "absolute", left: 0, top: -6, width: GUTTER - 6, textAlign: "right", fontSize: 10, color: C.faint }}>{pad(h)}h</div>
+                  <div style={{ position: "absolute", left: GUTTER, right: 0, borderTop: `1px solid ${C.line}` }} />
+                </div>
+              );
+            })}
+            <div className="flex" style={{ position: "absolute", left: GUTTER, right: 0, top: 0, bottom: 0 }}>
+              {days.map((k) => {
+                const laid = layoutDay(byDay[k]); const isToday = k === todayKey();
                 return (
-                  <button key={it.id} onClick={() => onOpen(it)} className="w-full text-left rounded-lg px-2 py-1.5"
-                          style={{ background: s.bg, borderLeft: `3px solid ${s.dot}`, opacity: it.status === "cancelado" ? 0.55 : 1 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: s.fg }}>{it.time}</div>
-                    <div className="truncate" style={{ fontSize: 12, fontWeight: 600, color: C.ink }}>{it.patient}</div>
-                    {it.procedure && <div className="truncate" style={{ fontSize: 10, color: s.fg }}>{it.procedure}</div>}
-                  </button>
+                  <div key={k} style={{ flex: 1, minWidth: DAY_MIN, position: "relative", borderLeft: `1px solid ${C.line}`, background: isToday ? "#A055740A" : "transparent" }}>
+                    {laid.map((ev) => {
+                      const s = STATUS[ev.status] || STATUS.pendente;
+                      const top = (ev.startMin - rangeStart) * PPM;
+                      const height = Math.max((ev.endMin - ev.startMin) * PPM - 2, wide ? 36 : 24);
+                      const w = 100 / ev._cols, left = ev._col * w;
+                      return (
+                        <button key={ev.id} onClick={() => onOpen(ev)}
+                                style={{ position: "absolute", top, height, left: `calc(${left}% + 1px)`, width: `calc(${w}% - 2px)`, background: s.bg, borderLeft: `3px solid ${s.dot}`, borderRadius: 6, padding: wide ? "4px 8px" : "2px 5px", overflow: "hidden", textAlign: "left", opacity: ev.status === "cancelado" ? 0.5 : 1 }}>
+                          <div style={{ fontSize: wide ? 11 : 10, fontWeight: 600, color: s.fg, lineHeight: 1.15 }}>{ev.time}{wide && ev.endTime ? `–${ev.endTime}` : ""}</div>
+                          <div className="truncate" style={{ fontSize: wide ? 13 : 11, fontWeight: 600, color: C.ink, lineHeight: 1.2 }}>{ev.patient}</div>
+                          {procsLabel(ev) && height > (wide ? 46 : 42) && <div style={{ fontSize: wide ? 11 : 9, color: s.fg, lineHeight: 1.25, marginTop: 1, whiteSpace: wide ? "normal" : "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{procsLabel(ev)}</div>}
+                        </button>
+                      );
+                    })}
+                  </div>
                 );
               })}
             </div>
           </div>
-        );
-      })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1580,15 +1648,33 @@ function Field({ label, children }) {
 }
 
 function FormModal({ initial, onClose, onSave, onDelete }) {
-  const [f, setF] = useState({
-    patient: "", phone: "", instagram: "", date: "", time: "09:00", endTime: "10:00",
-    procedure: "", valor: "", sinal: "", sinalPara: "", parcelas: "", formaPgto: "", aviso: "", notes: "", status: "pendente", ...initial,
+  const [f, setF] = useState(() => {
+    const base = {
+      patient: "", phone: "", instagram: "", date: "", time: "09:00", endTime: "10:00",
+      procedure: "", procedures: [], valor: "", precoModo: "vista", pagamentos: [], aviso: "", notes: "", status: "pendente", ...initial,
+    };
+    if ((!base.pagamentos || !base.pagamentos.length) && toNum(base.sinal) > 0) {
+      base.pagamentos = [{ valor: base.sinal, forma: base.formaPgto || "", conta: base.sinalPara || "", parcelas: base.parcelas || "" }];
+    }
+    return base;
   });
   const [customProc, setCustomProc] = useState(!!(initial.procedure && !procByName(initial.procedure)));
   const [err, setErr] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const recalc = (st) => {
+    const comTaxa = st.precoModo === "taxa";
+    const nomes = [st.procedure, ...(st.procedures || [])].filter(Boolean);
+    let total = 0, achou = false;
+    for (const nm of nomes) { const p = procByName(nm); if (p) { total += comTaxa ? p.parc : p.vista; achou = true; } }
+    return achou ? { ...st, valor: String(total) } : st;
+  };
+  const setPagamentos = (arr) => setF((prev) => { const temConta = arr.some((p) => p.conta && toNum(p.valor) > 0); return { ...prev, pagamentos: arr, status: temConta ? "concluido" : prev.status }; });
+  const addPag = () => setPagamentos([...(f.pagamentos || []), { valor: "", forma: "", conta: "", parcelas: "" }]);
+  const updPag = (idx, patch) => setPagamentos((f.pagamentos || []).map((p, j) => (j === idx ? { ...p, ...patch } : p)));
+  const removePag = (idx) => setPagamentos((f.pagamentos || []).filter((_, j) => j !== idx));
   const inputStyle = { width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink };
-  const saldo = toNum(f.valor) - toNum(f.sinal);
+  const totalPago = (f.pagamentos || []).reduce((s, p) => s + toNum(p.valor), 0);
+  const saldo = toNum(f.valor) - totalPago;
 
   const submit = () => {
     if (!f.patient.trim()) return setErr("Informe o nome do paciente.");
@@ -1640,8 +1726,7 @@ function FormModal({ initial, onClose, onSave, onDelete }) {
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v === "__outro") { setCustomProc(true); set("procedure", ""); }
-                      else { setCustomProc(false); const p = procByName(v);
-                        setF((prev) => ({ ...prev, procedure: v, valor: p ? String(prev.parcelas > 1 ? p.parc : p.vista) : prev.valor })); }
+                      else { setCustomProc(false); setF((prev) => recalc({ ...prev, procedure: v })); }
                     }}>
               <option value="">Selecione…</option>
               {PROCS.map((p) => <option key={p.nome} value={p.nome}>{p.nome} — {brl(p.vista)}</option>)}
@@ -1651,60 +1736,71 @@ function FormModal({ initial, onClose, onSave, onDelete }) {
               <input value={f.procedure} onChange={(e) => set("procedure", e.target.value)} placeholder="Nome do procedimento"
                      style={{ ...inputStyle, marginTop: 8 }} />
             )}
+            {(f.procedures || []).map((nm, idx) => (
+              <div key={idx} className="flex gap-1.5 mt-2">
+                <select value={nm} style={{ ...inputStyle, flex: 1 }}
+                        onChange={(e) => setF((prev) => { const arr = [...(prev.procedures || [])]; arr[idx] = e.target.value; return recalc({ ...prev, procedures: arr }); })}>
+                  <option value="">Procedimento adicional…</option>
+                  {PROCS.map((p) => <option key={p.nome} value={p.nome}>{p.nome} — {brl(p.vista)}</option>)}
+                </select>
+                <button onClick={() => setF((prev) => recalc({ ...prev, procedures: (prev.procedures || []).filter((_, j) => j !== idx) }))}
+                        className="w-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.bg, color: C.faint }}><X size={15} /></button>
+              </div>
+            ))}
+            <button onClick={() => setF((prev) => ({ ...prev, procedures: [...(prev.procedures || []), ""] }))}
+                    className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 font-medium mt-2" style={{ background: C.tealSoft, color: C.teal }}>
+              <Plus size={13} /> Adicionar procedimento
+            </button>
           </Field>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <Field label="Valor (R$)">
-              <input inputMode="decimal" value={f.valor} onChange={(e) => set("valor", e.target.value)} placeholder="0,00" style={inputStyle} />
-            </Field>
-            <Field label="Sinal pago (R$)">
-              <input inputMode="decimal" value={f.sinal} onChange={(e) => set("sinal", e.target.value)} placeholder="0,00" style={inputStyle} />
-            </Field>
+          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+            <span className="text-xs font-medium" style={{ color: C.muted }}>Valor:</span>
+            {[["vista", "À vista"], ["taxa", "Com taxa (cartão)"]].map(([k, l]) => (
+              <button key={k} onClick={() => setF((prev) => recalc({ ...prev, precoModo: k }))} className="text-xs rounded-full px-3 py-1 font-medium"
+                      style={{ background: f.precoModo === k ? C.ink : C.bg, color: f.precoModo === k ? "#fff" : C.muted, border: `1px solid ${f.precoModo === k ? C.ink : C.line}` }}>{l}</button>
+            ))}
           </div>
-          {toNum(f.sinal) > 0 && (
-            <>
-              <Field label="Forma de pagamento">
-                <div className="flex gap-1.5">
-                  {["Pix", "Crédito", "Débito"].map((r) => (
-                    <button key={r}
-                            onClick={() => setF((prev) => { const p = procByName(prev.procedure); const nova = prev.formaPgto === r ? "" : r; const semTaxa = nova === "Pix" || nova === ""; return { ...prev, formaPgto: nova, parcelas: nova === "Crédito" ? prev.parcelas : "", valor: p ? String(semTaxa ? p.vista : p.parc) : prev.valor }; })}
-                            className="flex-1 text-sm rounded-lg py-2 font-medium"
-                            style={{ background: f.formaPgto === r ? C.ink : C.bg, color: f.formaPgto === r ? "#fff" : C.muted, border: `1px solid ${f.formaPgto === r ? C.ink : C.line}` }}>{r}</button>
-                  ))}
+          <Field label="Valor total (R$)">
+            <input inputMode="decimal" value={f.valor} onChange={(e) => set("valor", e.target.value)} placeholder="0,00" style={inputStyle} />
+          </Field>
+
+          <div>
+            <div className="text-xs font-medium mb-1" style={{ color: C.muted }}>Pagamentos <span style={{ color: C.faint }}>(pode dividir)</span></div>
+            {(f.pagamentos || []).map((p, idx) => (
+              <div key={idx} className="rounded-xl p-2.5 mb-2" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+                <div className="flex gap-1.5 items-center">
+                  <input inputMode="decimal" value={p.valor} onChange={(e) => updPag(idx, { valor: e.target.value })} placeholder="R$ 0,00" style={{ ...inputStyle, background: C.surface, flex: 1 }} />
+                  <select value={p.forma || ""} onChange={(e) => updPag(idx, { forma: e.target.value })} style={{ ...inputStyle, background: C.surface, width: 118 }}>
+                    <option value="">Forma…</option>
+                    {["Pix", "Dinheiro", "Crédito", "Débito"].map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                  <button onClick={() => removePag(idx)} className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ color: C.faint }}><X size={15} /></button>
                 </div>
-                {f.formaPgto === "Pix" && <div className="text-xs mt-1.5" style={{ color: C.goodFg }}>À vista, sem taxa.</div>}
-                {(f.formaPgto === "Crédito" || f.formaPgto === "Débito") && <div className="text-xs mt-1.5" style={{ color: C.muted }}>Valor com taxa do cartão.</div>}
-              </Field>
-              {f.formaPgto === "Crédito" && (
-                <Field label="Parcelas">
-                  <div className="flex gap-1.5">
-                    {[1, 2, 3, 4].map((n) => (
-                      <button key={n} onClick={() => set("parcelas", n)} className="flex-1 text-sm rounded-lg py-2 font-medium"
-                              style={{ background: f.parcelas === n ? C.ink : C.bg, color: f.parcelas === n ? "#fff" : C.muted, border: `1px solid ${f.parcelas === n ? C.ink : C.line}` }}>{n}x</button>
+                <div className="flex gap-1.5 items-center mt-1.5">
+                  <div className="flex gap-1 flex-1">
+                    {["Loan", "Mari"].map((c) => (
+                      <button key={c} onClick={() => updPag(idx, { conta: p.conta === c ? "" : c })} className="flex-1 text-xs rounded-lg py-1.5 font-medium"
+                              style={{ background: p.conta === c ? C.ink : C.surface, color: p.conta === c ? "#fff" : C.muted, border: `1px solid ${p.conta === c ? C.ink : C.line}` }}>{c}</button>
                     ))}
                   </div>
-                  {f.parcelas > 0 && toNum(f.valor) > 0 && (
-                    <div className="text-xs mt-1.5" style={{ color: C.muted }}>
-                      {f.parcelas}x de {brl(toNum(f.valor) / f.parcelas)} · total {brl(f.valor)}
-                    </div>
+                  {p.forma === "Crédito" && (
+                    <select value={p.parcelas || ""} onChange={(e) => updPag(idx, { parcelas: e.target.value })} style={{ ...inputStyle, background: C.surface, width: 84 }}>
+                      {["", "1", "2", "3", "4"].map((n) => <option key={n} value={n}>{n ? n + "x" : "Parc."}</option>)}
+                    </select>
                   )}
-                </Field>
-              )}
-              <Field label="Conta (recebedor)">
-                <div className="flex gap-1.5">
-                  {["Loan", "Mari"].map((r) => (
-                    <button key={r} onClick={() => { const novo = f.sinalPara === r ? "" : r; setF((prev) => ({ ...prev, sinalPara: novo, status: novo ? "concluido" : prev.status })); }} className="flex-1 text-sm rounded-lg py-2 font-medium"
-                            style={{ background: f.sinalPara === r ? C.ink : C.bg, color: f.sinalPara === r ? "#fff" : C.muted, border: `1px solid ${f.sinalPara === r ? C.ink : C.line}` }}>{r}</button>
-                  ))}
                 </div>
-              </Field>
-            </>
-          )}
+              </div>
+            ))}
+            <button onClick={addPag} className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 font-medium" style={{ background: C.tealSoft, color: C.teal }}>
+              <Plus size={13} /> Adicionar pagamento
+            </button>
+          </div>
+
           {toNum(f.valor) > 0 && (
             <div className="rounded-xl p-3.5" style={{ background: saldo <= 0 ? C.goodBg : C.coralSoft, border: `1px solid ${(saldo <= 0 ? C.goodFg : C.coral) + "33"}` }}>
               <div className="flex justify-between text-xs mb-2" style={{ color: C.muted }}>
                 <span>Total {brl(f.valor)}</span>
-                <span>Sinal pago {brl(f.sinal || 0)}</span>
+                <span>Pago {brl(totalPago)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold" style={{ color: saldo <= 0 ? C.goodFg : C.coral }}>{saldo <= 0 ? "Pagamento quitado" : "Falta pagar"}</span>
