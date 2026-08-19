@@ -240,6 +240,7 @@ const NOTES_KEY = "agenda:afazeres:v1";
 const PEOPLE_KEY = "agenda:pacientes:v1";
 const STOCK_KEY = "agenda:estoque:v1";
 const PROCS_KEY = "agenda:procedimentos:v1";
+const CHAMADAS_KEY = "agenda:chamadas:v1";
 
 // ---- App -------------------------------------------------------------------
 export default function App() {
@@ -262,6 +263,8 @@ export default function App() {
   const [estoque, setEstoque] = useState([]);
   const [estoqueForm, setEstoqueForm] = useState(null);
   const [procs, setProcs] = useState(PROCS_PADRAO);
+  // { "nome|categoria": { em: "AAAA-MM-DD", ref: data da consulta que gerou o prazo } }
+  const [chamadas, setChamadas] = useState({});
   const [auth, setAuth] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -295,8 +298,8 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e, pr] = await Promise.all([
-        ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY),
+      const [c, n, p, e, pr, ch] = await Promise.all([
+        ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY), ler(CHAMADAS_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
@@ -304,6 +307,7 @@ export default function App() {
       const vp = parse(p); if (vp) setPeople(vp);
       const ve = parse(e); if (ve) setEstoque(ve);
       const vpr = parse(pr); if (vpr && vpr.length) setProcs(vpr);
+      const vch = parse(ch); if (vch) setChamadas(vch);
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -351,6 +355,11 @@ export default function App() {
     try { await store.set(STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
     flash(`${ids.length} ${ids.length === 1 ? "consulta corrigida" : "consultas corrigidas"}.`);
   };
+  const persistChamadas = async (next) => { setChamadas(next); try { await store.set(CHAMADAS_KEY, JSON.stringify(next)); } catch (_) {} };
+  // "ref" guarda a consulta que gerou o prazo: se a pessoa fizer procedimento
+  // novo, a marca antiga deixa de valer e ela volta para a fila sozinha.
+  const marcarChamado = (chave, ref) => persistChamadas({ ...chamadas, [chave]: { em: todayKey(), ref } });
+  const desfazerChamado = (chave) => { const next = { ...chamadas }; delete next[chave]; persistChamadas(next); };
   const persistProcs = async (next) => { setProcs(next); try { await store.set(PROCS_KEY, JSON.stringify(next)); } catch (_) {} };
   // Renomear no cadastro tem que renomear nas consultas ja salvas, senao elas
   // viram "fora do cadastro" e somem da contagem.
@@ -612,7 +621,8 @@ export default function App() {
         ) : view === "retornos" ? (
           <RetornosView items={items} onAgendar={openNewFor} onHistory={openHistory} />
         ) : view === "chamar" ? (
-          <ChamarView items={items} onAgendar={openNewFor} onHistory={openHistory} />
+          <ChamarView items={items} chamadas={chamadas} onChamar={marcarChamado}
+                     onDesfazer={desfazerChamado} onAgendar={openNewFor} onHistory={openHistory} />
         ) : view === "pagamentos" ? (
           <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
         ) : view === "estoque" ? (
@@ -1284,8 +1294,15 @@ function RetornosView({ items, onAgendar, onHistory }) {
 }
 
 // ---- Chamar de volta (recontato por tempo) ---------------------------------
-function ChamarView({ items, onHistory, onAgendar }) {
+function ChamarView({ items, chamadas, onChamar, onDesfazer, onHistory, onAgendar }) {
   const [filtro, setFiltro] = useState("todos");
+  const chaveDe = (nome, cat) => `${normNome(nome)}|${cat}`;
+  // A marca so vale para a consulta que gerou o prazo (ref). Procedimento novo
+  // muda a ref e a pessoa volta para a fila automaticamente.
+  const jaChamado = (nome, e) => {
+    const r = (chamadas || {})[chaveDe(nome, e.cat)];
+    return r && r.ref === e.date ? r : null;
+  };
   const lista = useMemo(() => deriveChamar(items), [items]);
   const filt = lista.filter((m) => (filtro === "todos" ? true : m.cats[filtro]));
   const pick = (m) => (filtro !== "todos" ? m.entries.find((x) => x.cat === filtro) : m.urgente);
@@ -1296,22 +1313,20 @@ function ChamarView({ items, onHistory, onAgendar }) {
     for (const m of filt) {
       const e = pick(m);
       if (!e) continue;
-      const chave = e.overdue ? "atrasados" : ymOf(e.chamarKey);
+      const marca = jaChamado(m.name, e);
+      const chave = marca ? "chamados" : (e.overdue ? "atrasados" : ymOf(e.chamarKey));
       if (!g[chave]) g[chave] = [];
-      g[chave].push({ m, e });
+      g[chave].push({ m, e, marca });
     }
     for (const k of Object.keys(g)) g[k].sort((a, b) => a.e.chamarKey.localeCompare(b.e.chamarKey));
-    const chaves = Object.keys(g).sort((a, b) => {
-      if (a === "atrasados") return -1;
-      if (b === "atrasados") return 1;
-      return a.localeCompare(b);
-    });
+    const peso = (k) => (k === "atrasados" ? 0 : k === "chamados" ? 2 : 1);
+    const chaves = Object.keys(g).sort((a, b) => (peso(a) - peso(b)) || a.localeCompare(b));
     return chaves.map((k) => ({
       chave: k,
-      titulo: k === "atrasados" ? "Passou do prazo" : tituloMes(k),
+      titulo: k === "atrasados" ? "Passou do prazo" : k === "chamados" ? "Já chamados" : tituloMes(k),
       linhas: g[k],
     }));
-  }, [filt, filtro]);
+  }, [filt, filtro, chamadas]);
 
   if (lista.length === 0)
     return <EmptyBlock icon={PhoneCall} title="Ninguém para chamar ainda" text="Conforme os pacientes fazem procedimentos, aparecem aqui no prazo de chamar de volta." />;
@@ -1331,22 +1346,24 @@ function ChamarView({ items, onHistory, onAgendar }) {
 
       {grupos.map((grupo) => {
         const atrasado = grupo.chave === "atrasados";
+        const feito = grupo.chave === "chamados";
         return (
           <div key={grupo.chave} className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <div className="text-sm font-semibold" style={{ color: atrasado ? C.coral : C.ink }}>{grupo.titulo}</div>
+              <div className="text-sm font-semibold" style={{ color: atrasado ? C.coral : feito ? C.muted : C.ink }}>{grupo.titulo}</div>
               <div className="text-xs rounded-full px-2 py-0.5"
-                   style={{ background: atrasado ? C.coralSoft : C.tealSoft, color: atrasado ? C.coral : C.teal }}>
+                   style={{ background: atrasado ? C.coralSoft : feito ? C.bg : C.tealSoft, color: atrasado ? C.coral : feito ? C.muted : C.teal }}>
                 {grupo.linhas.length}
               </div>
               <div className="flex-1" style={{ height: 1, background: C.line }} />
             </div>
 
             <div className="space-y-2">
-              {grupo.linhas.map(({ m, e }) => {
+              {grupo.linhas.map(({ m, e, marca }) => {
                 const wa = m.phone ? "https://wa.me/55" + m.phone.replace(/\D/g, "") : null;
                 return (
-                  <div key={m.name + e.cat} className="rounded-2xl p-3.5" style={{ background: C.surface, border: `1px solid ${atrasado ? C.coral : C.line}` }}>
+                  <div key={m.name + e.cat} className="rounded-2xl p-3.5"
+                       style={{ background: C.surface, border: `1px solid ${atrasado ? C.coral : C.line}`, opacity: feito ? 0.72 : 1 }}>
                     <div className="flex items-center gap-3">
                       <button onClick={() => onHistory(m.name)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 ff-d text-sm"
                               style={{ background: C.tealSoft, color: C.teal, fontWeight: 700 }}>{initials(m.name)}</button>
@@ -1358,13 +1375,28 @@ function ChamarView({ items, onHistory, onAgendar }) {
                       </button>
                       <div className="text-right shrink-0">
                         <div className="ff-d text-sm" style={{ fontWeight: 700, color: atrasado ? C.coral : C.ink }}>{shortDate(e.chamarKey)}</div>
-                        <div className="text-xs" style={{ color: atrasado ? C.coral : C.muted }}>{chamarLabel(e.chamarKey)}</div>
+                        <div className="text-xs" style={{ color: atrasado ? C.coral : C.muted }}>
+                          {marca ? `chamado ${shortDate(marca.em)}` : chamarLabel(e.chamarKey)}
+                        </div>
                       </div>
                     </div>
                     <div className="flex gap-1.5 mt-3">
                       {wa && <a href={wa} target="_blank" rel="noreferrer" className="flex-1 text-center text-xs rounded-lg py-2 font-medium flex items-center justify-center gap-1.5" style={{ background: C.goodBg, color: C.goodFg }}><MessageCircle size={13} /> WhatsApp</a>}
                       <button onClick={() => onAgendar({ name: m.name, phone: m.phone, instagram: m.instagram })} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Agendar</button>
                     </div>
+                    {marca ? (
+                      <button onClick={() => onDesfazer(chaveDe(m.name, e.cat))}
+                              className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium"
+                              style={{ background: C.bg, color: C.muted, border: `1px solid ${C.line}` }}>
+                        Desfazer · voltar para a fila
+                      </button>
+                    ) : (
+                      <button onClick={() => onChamar(chaveDe(m.name, e.cat), e.date)}
+                              className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium flex items-center justify-center gap-1.5"
+                              style={{ background: C.tealSoft, color: C.teal, border: `1px solid ${C.line}` }}>
+                        <Check size={13} /> Já chamei
+                      </button>
+                    )}
                   </div>
                 );
               })}
