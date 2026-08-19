@@ -1715,7 +1715,32 @@ function FormModal({ initial, procs, onClose, onSave, onDelete }) {
     for (const nm of nomes) { const p = procByName(nm); if (p) { total += comTaxa ? p.parc : p.vista; achou = true; } }
     return achou ? { ...st, valor: String(total) } : st;
   };
-  const setPagamentos = (arr) => setF((prev) => { const temConta = arr.some((p) => p.conta && toNum(p.valor) > 0); return { ...prev, pagamentos: arr, status: temConta ? "concluido" : prev.status }; });
+  // So conclui quando o valor foi quitado. Sinal / pagamento parcial confirma a
+  // consulta, mas NAO marca como concluida.
+  // concluiuAuto lembra se o "concluido" veio daqui: se veio e o pagamento
+  // deixar de cobrir o total (ex: corrigiram 600 para 150), volta para
+  // confirmado. Se a pessoa marcou Concluido na mao, a escolha dela e mantida
+  // - procedimento feito com saldo em aberto e caso legitimo.
+  const concluiuAuto = React.useRef(false);
+  const setPagamentos = (arr) => setF((prev) => {
+    const pago = arr.reduce((sum, p) => sum + toNum(p.valor), 0);
+    const total = toNum(prev.valor);
+    let status = prev.status;
+    if (prev.status !== "cancelado") {
+      if (total > 0 && pago >= total) {
+        if (status !== "concluido") concluiuAuto.current = true;
+        status = "concluido";
+      } else if (prev.status === "concluido" && concluiuAuto.current) {
+        status = pago > 0 ? "confirmado" : "pendente";
+        concluiuAuto.current = false;
+      } else if (pago > 0 && prev.status === "pendente") {
+        status = "confirmado";
+      }
+    }
+    return { ...prev, pagamentos: arr, status };
+  });
+  // escolha manual passa a mandar: o automatico nao desfaz mais
+  const setStatusManual = (k) => { concluiuAuto.current = false; set("status", k); };
   const addPag = () => setPagamentos([...(f.pagamentos || []), { valor: "", forma: "", conta: "", parcelas: "" }]);
   const updPag = (idx, patch) => setPagamentos((f.pagamentos || []).map((p, j) => (j === idx ? { ...p, ...patch } : p)));
   const removePag = (idx) => setPagamentos((f.pagamentos || []).filter((_, j) => j !== idx));
@@ -1850,7 +1875,9 @@ function FormModal({ initial, procs, onClose, onSave, onDelete }) {
                 <span>Pago {brl(totalPago)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold" style={{ color: saldo <= 0 ? C.goodFg : C.coral }}>{saldo <= 0 ? "Pagamento quitado" : "Falta pagar"}</span>
+                <span className="text-sm font-semibold" style={{ color: saldo <= 0 ? C.goodFg : C.coral }}>
+                  {saldo <= 0 ? "Pagamento quitado" : (totalPago > 0 ? "Sinal pago · falta" : "Falta pagar")}
+                </span>
                 <span className="ff-d" style={{ fontSize: 26, fontWeight: 700, color: saldo <= 0 ? C.goodFg : C.coral }}>{brl(Math.max(saldo, 0))}</span>
               </div>
             </div>
@@ -1864,7 +1891,7 @@ function FormModal({ initial, procs, onClose, onSave, onDelete }) {
           <Field label="Status">
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(STATUS).map(([k, v]) => (
-                <button key={k} onClick={() => set("status", k)} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium"
+                <button key={k} onClick={() => setStatusManual(k)} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium"
                         style={{ background: f.status === k ? v.bg : C.bg, color: f.status === k ? v.fg : C.faint,
                                  border: `1px solid ${f.status === k ? v.dot + "55" : C.line}` }}>
                   <span style={{ width: 6, height: 6, borderRadius: 6, background: v.dot }} /> {v.label}
