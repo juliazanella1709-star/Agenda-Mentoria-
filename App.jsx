@@ -3,7 +3,7 @@ import {
   Calendar, Plus, Phone, Trash2, Pencil, ChevronLeft, ChevronRight,
   Search, X, Check, CalendarDays, User, Instagram, AlertCircle,
   Users, Wallet, TrendingUp, List, Clock, RotateCcw, PhoneCall, MessageCircle, Package, Minus, Eye, EyeOff, LogOut,
-  FileSpreadsheet,
+  FileSpreadsheet, ClipboardList,
 } from "lucide-react";
 import { auth as fbAuth } from "./firebase";
 import { store } from "./store";
@@ -13,6 +13,7 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebas
 const FaturamentoChart = React.lazy(() => import("./Chart"));
 // Idem: a biblioteca de Excel so desce ao abrir a aba Exportar.
 const ExportView = React.lazy(() => import("./Export"));
+const ProcedimentosView = React.lazy(() => import("./Procedimentos"));
 
 // ---- Tema ------------------------------------------------------------------
 const C = {
@@ -230,6 +231,7 @@ const STORAGE_KEY = "agenda:consultas:v2";
 const NOTES_KEY = "agenda:afazeres:v1";
 const PEOPLE_KEY = "agenda:pacientes:v1";
 const STOCK_KEY = "agenda:estoque:v1";
+const METAS_KEY = "agenda:metas:v1";
 
 // ---- App -------------------------------------------------------------------
 export default function App() {
@@ -251,6 +253,7 @@ export default function App() {
   const [patientForm, setPatientForm] = useState(null);
   const [estoque, setEstoque] = useState([]);
   const [estoqueForm, setEstoqueForm] = useState(null);
+  const [metas, setMetas] = useState({}); // { "nome do procedimento": quantidade alvo }
   const [auth, setAuth] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -284,14 +287,15 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e] = await Promise.all([
-        ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY),
+      const [c, n, p, e, mt] = await Promise.all([
+        ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(METAS_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
       const vn = parse(n); if (vn) setNotas(vn);
       const vp = parse(p); if (vp) setPeople(vp);
       const ve = parse(e); if (ve) setEstoque(ve);
+      const vm = parse(mt); if (vm) setMetas(vm);
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -331,6 +335,7 @@ export default function App() {
     persistPeople(next); setPatientForm(null); flash("Paciente cadastrado.");
   };
   const weekShift = (dir) => { const d = parseKey(selected); d.setDate(d.getDate() + dir * (weekSpan >= 7 ? 7 : weekSpan)); setSelected(keyOf(d)); setCursor({ y: d.getFullYear(), m: d.getMonth() }); };
+  const persistMetas = async (next) => { setMetas(next); try { await store.set(METAS_KEY, JSON.stringify(next)); } catch (_) {} };
   const persistEstoque = async (next) => { setEstoque(next); try { await store.set(STOCK_KEY, JSON.stringify(next)); } catch (_) {} };
   const addEstoque = (it) => persistEstoque([...estoque, { ...it, id: uid() }]);
   const setEstoqueQtd = (id, qtd) => persistEstoque(estoque.map((i) => (i.id === id ? { ...i, qtd: Math.max(0, qtd) } : i)));
@@ -384,6 +389,7 @@ export default function App() {
     { id: "pagamentos", label: "Pagamentos", icon: Wallet },
     { id: "faturamento", label: "Faturamento", icon: TrendingUp },
     { id: "estoque", label: "Estoque", icon: Package },
+    { id: "procedimentos", label: "Procedimentos", icon: ClipboardList },
     { id: "exportar", label: "Exportar", icon: FileSpreadsheet },
   ];
 
@@ -582,6 +588,10 @@ export default function App() {
           <PaymentsView items={items} query={query} onEdit={setModal} />
         ) : view === "estoque" ? (
           <EstoqueView estoque={estoque} onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
+        ) : view === "procedimentos" ? (
+          <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
+            <ProcedimentosView items={items} metas={metas} onSaveMetas={persistMetas} procs={PROCS.map((x) => x.nome)} C={C} />
+          </Suspense>
         ) : view === "exportar" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
             <ExportView items={items} estoque={estoque} C={C} />
