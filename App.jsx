@@ -78,6 +78,8 @@ const toNum = (s) => {
 };
 const brl = (v) => toNum(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const igHandle = (s) => (s || "").replace(/^@+/, "");
+// "Leticia  BEZERRA" e "Letícia Bezerra" devem bater como a mesma pessoa
+const normNome = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" + ");
 const procsText = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" ");
 const initials = (name) => (name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase() || "?";
@@ -626,7 +628,7 @@ export default function App() {
       </main>
 
       {modal && (
-        <FormModal initial={modal} procs={procs} onClose={() => setModal(null)} onSave={save}
+        <FormModal initial={modal} procs={procs} pacientes={derivePatients(items, people)} onClose={() => setModal(null)} onSave={save}
                    onDelete={modal.id ? () => { remove(modal.id); setModal(null); } : null} />
       )}
 
@@ -1779,7 +1781,7 @@ function Field({ label, children }) {
   );
 }
 
-function FormModal({ initial, procs, onClose, onSave, onDelete }) {
+function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
   const procByName = (n) => procByNameIn(procs, n);
   const [f, setF] = useState(() => {
     const base = {
@@ -1791,6 +1793,25 @@ function FormModal({ initial, procs, onClose, onSave, onDelete }) {
     }
     return base;
   });
+  const [focoPaciente, setFocoPaciente] = useState(false);
+  const [escolhido, setEscolhido] = useState(!!(initial && initial.patient));
+  const buscaNome = normNome(f.patient);
+  const sugestoes = useMemo(() => {
+    if (!focoPaciente || escolhido || buscaNome.length < 2) return [];
+    return (pacientes || [])
+      .filter((p) => normNome(p.name).includes(buscaNome))
+      .slice(0, 6);
+  }, [pacientes, buscaNome, focoPaciente, escolhido]);
+  // nome digitado bate com alguem que ja existe, so escrito diferente
+  const jaExiste = useMemo(
+    () => (pacientes || []).find((p) => normNome(p.name) === buscaNome && p.name !== f.patient.trim()),
+    [pacientes, buscaNome, f.patient]
+  );
+  const usarPaciente = (p) => {
+    setF((prev) => ({ ...prev, patient: p.name, phone: p.phone || prev.phone, instagram: p.instagram || prev.instagram }));
+    setEscolhido(true);
+    setFocoPaciente(false);
+  };
   const [customProc, setCustomProc] = useState(!!(initial.procedure && !procByName(initial.procedure)));
   const [err, setErr] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -1855,7 +1876,40 @@ function FormModal({ initial, procs, onClose, onSave, onDelete }) {
 
         <div className="space-y-3">
           <Field label="Paciente *">
-            <input autoFocus value={f.patient} onChange={(e) => set("patient", e.target.value)} placeholder="Nome completo" style={inputStyle} />
+            <input autoFocus value={f.patient} placeholder="Nome completo" style={inputStyle}
+                   onFocus={() => setFocoPaciente(true)}
+                   onChange={(e) => { set("patient", e.target.value); setEscolhido(false); setFocoPaciente(true); }} />
+
+            {sugestoes.length > 0 && (
+              <div className="mt-1.5 rounded-xl overflow-hidden" style={{ border: `1px solid ${C.line}`, background: C.surface }}>
+                <div className="px-3 pt-2 pb-1 text-xs" style={{ color: C.muted }}>Já cadastrados — toque para usar</div>
+                {sugestoes.map((p) => (
+                  <button key={p.name} type="button" onClick={() => usarPaciente(p)}
+                          className="w-full text-left px-3 py-2 flex items-center gap-2"
+                          style={{ borderTop: `1px solid ${C.line}` }}>
+                    <User size={14} className="shrink-0" style={{ color: C.faint }} />
+                    <span className="flex-1 min-w-0">
+                      <span className="text-sm block truncate" style={{ color: C.ink }}>{p.name}</span>
+                      {(p.phone || p.instagram || p.visits.length > 0) && (
+                        <span className="text-xs" style={{ color: C.muted }}>
+                          {[p.phone, p.instagram ? "@" + p.instagram : "",
+                            p.visits.length ? `${p.visits.length} ${p.visits.length === 1 ? "consulta" : "consultas"}` : ""]
+                            .filter(Boolean).join(" · ")}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {jaExiste && (
+              <button type="button" onClick={() => usarPaciente(jaExiste)}
+                      className="w-full text-left mt-1.5 rounded-xl px-3 py-2 text-xs"
+                      style={{ background: C.coralSoft, color: C.coral, border: `1px solid ${C.coral}33` }}>
+                Já existe <b>{jaExiste.name}</b> — toque para usar esse cadastro em vez de criar outro.
+              </button>
+            )}
           </Field>
 
           <div className="grid grid-cols-2 gap-2.5">
