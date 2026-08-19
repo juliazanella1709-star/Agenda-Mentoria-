@@ -68,6 +68,10 @@ const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return new
 const prettyDate = (k) => { const d = parseKey(k); return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()].toLowerCase()}`; };
 const shortDate = (k) => { const d = parseKey(k); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
 const ymOf = (k) => k.slice(0, 7);
+const tituloMes = (ym) => { const [y, m] = ym.split("-").map(Number);
+  const agora = new Date();
+  const mesmoAno = y === agora.getFullYear();
+  return mesmoAno ? MESES[m - 1] : `${MESES[m - 1]} de ${y}`; };
 
 const toNum = (s) => {
   if (typeof s === "number") return s;
@@ -1285,7 +1289,29 @@ function ChamarView({ items, onHistory, onAgendar }) {
   const lista = useMemo(() => deriveChamar(items), [items]);
   const filt = lista.filter((m) => (filtro === "todos" ? true : m.cats[filtro]));
   const pick = (m) => (filtro !== "todos" ? m.entries.find((x) => x.cat === filtro) : m.urgente);
-  filt.sort((a, b) => ((pick(a) || {}).chamarKey || "9999").localeCompare((pick(b) || {}).chamarKey || "9999"));
+
+  // Agrupa pela data de chamar: primeiro quem ja passou do prazo, depois mes a mes.
+  const grupos = useMemo(() => {
+    const g = {};
+    for (const m of filt) {
+      const e = pick(m);
+      if (!e) continue;
+      const chave = e.overdue ? "atrasados" : ymOf(e.chamarKey);
+      if (!g[chave]) g[chave] = [];
+      g[chave].push({ m, e });
+    }
+    for (const k of Object.keys(g)) g[k].sort((a, b) => a.e.chamarKey.localeCompare(b.e.chamarKey));
+    const chaves = Object.keys(g).sort((a, b) => {
+      if (a === "atrasados") return -1;
+      if (b === "atrasados") return 1;
+      return a.localeCompare(b);
+    });
+    return chaves.map((k) => ({
+      chave: k,
+      titulo: k === "atrasados" ? "Passou do prazo" : tituloMes(k),
+      linhas: g[k],
+    }));
+  }, [filt, filtro]);
 
   if (lista.length === 0)
     return <EmptyBlock icon={PhoneCall} title="Ninguém para chamar ainda" text="Conforme os pacientes fazem procedimentos, aparecem aqui no prazo de chamar de volta." />;
@@ -1302,35 +1328,50 @@ function ChamarView({ items, onHistory, onAgendar }) {
                   style={{ background: filtro === k ? C.ink : C.surface, color: filtro === k ? "#fff" : C.muted, border: `1px solid ${filtro === k ? C.ink : C.line}` }}>{l}</button>
         ))}
       </div>
-      <div className="space-y-2">
-        {filt.map((m) => {
-          const e = pick(m);
-          const over = e && e.overdue;
-          const wa = m.phone ? "https://wa.me/55" + m.phone.replace(/\D/g, "") : null;
-          return (
-            <div key={m.name} className="rounded-2xl p-3.5" style={{ background: C.surface, border: `1px solid ${over ? C.coral : C.line}` }}>
-              <div className="flex items-center gap-3">
-                <button onClick={() => onHistory(m.name)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 ff-d text-sm"
-                        style={{ background: C.tealSoft, color: C.teal, fontWeight: 700 }}>{initials(m.name)}</button>
-                <button onClick={() => onHistory(m.name)} className="flex-1 min-w-0 text-left">
-                  <div className="font-semibold truncate" style={{ color: C.ink }}>{m.name}</div>
-                  <div className="text-xs truncate" style={{ color: C.muted }}>{m.phone || "sem telefone"}</div>
-                </button>
-                {e && (
-                  <div className="text-right shrink-0">
-                    <div className="text-xs" style={{ color: C.muted }}>{e.label}</div>
-                    <div className="text-xs font-semibold" style={{ color: over ? C.coral : C.teal }}>{chamarLabel(e.chamarKey)}</div>
-                  </div>
-                )}
+
+      {grupos.map((grupo) => {
+        const atrasado = grupo.chave === "atrasados";
+        return (
+          <div key={grupo.chave} className="mb-5">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="text-sm font-semibold" style={{ color: atrasado ? C.coral : C.ink }}>{grupo.titulo}</div>
+              <div className="text-xs rounded-full px-2 py-0.5"
+                   style={{ background: atrasado ? C.coralSoft : C.tealSoft, color: atrasado ? C.coral : C.teal }}>
+                {grupo.linhas.length}
               </div>
-              <div className="flex gap-1.5 mt-3">
-                {wa && <a href={wa} target="_blank" rel="noreferrer" className="flex-1 text-center text-xs rounded-lg py-2 font-medium flex items-center justify-center gap-1.5" style={{ background: C.goodBg, color: C.goodFg }}><MessageCircle size={13} /> WhatsApp</a>}
-                <button onClick={() => onAgendar({ name: m.name, phone: m.phone, instagram: m.instagram })} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Agendar</button>
-              </div>
+              <div className="flex-1" style={{ height: 1, background: C.line }} />
             </div>
-          );
-        })}
-      </div>
+
+            <div className="space-y-2">
+              {grupo.linhas.map(({ m, e }) => {
+                const wa = m.phone ? "https://wa.me/55" + m.phone.replace(/\D/g, "") : null;
+                return (
+                  <div key={m.name + e.cat} className="rounded-2xl p-3.5" style={{ background: C.surface, border: `1px solid ${atrasado ? C.coral : C.line}` }}>
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => onHistory(m.name)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 ff-d text-sm"
+                              style={{ background: C.tealSoft, color: C.teal, fontWeight: 700 }}>{initials(m.name)}</button>
+                      <button onClick={() => onHistory(m.name)} className="flex-1 min-w-0 text-left">
+                        <div className="font-semibold truncate" style={{ color: C.ink }}>{m.name}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>
+                          {e.label} em {shortDate(e.date)} · {m.phone || "sem telefone"}
+                        </div>
+                      </button>
+                      <div className="text-right shrink-0">
+                        <div className="ff-d text-sm" style={{ fontWeight: 700, color: atrasado ? C.coral : C.ink }}>{shortDate(e.chamarKey)}</div>
+                        <div className="text-xs" style={{ color: atrasado ? C.coral : C.muted }}>{chamarLabel(e.chamarKey)}</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 mt-3">
+                      {wa && <a href={wa} target="_blank" rel="noreferrer" className="flex-1 text-center text-xs rounded-lg py-2 font-medium flex items-center justify-center gap-1.5" style={{ background: C.goodBg, color: C.goodFg }}><MessageCircle size={13} /> WhatsApp</a>}
+                      <button onClick={() => onAgendar({ name: m.name, phone: m.phone, instagram: m.instagram })} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Agendar</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
