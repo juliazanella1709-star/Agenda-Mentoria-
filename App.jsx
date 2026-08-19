@@ -337,6 +337,14 @@ export default function App() {
     persistPeople(next); setPatientForm(null); flash("Paciente cadastrado.");
   };
   const weekShift = (dir) => { const d = parseKey(selected); d.setDate(d.getDate() + dir * (weekSpan >= 7 ? 7 : weekSpan)); setSelected(keyOf(d)); setCursor({ y: d.getFullYear(), m: d.getMonth() }); };
+  // Correcao em lote das consultas que ficaram concluidas com saldo em aberto.
+  const corrigirStatus = async (ids) => {
+    const alvo = new Set(ids);
+    const next = items.map((it) => (alvo.has(it.id) ? { ...it, status: "confirmado" } : it));
+    setItems(next);
+    try { await store.set(STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
+    flash(`${ids.length} ${ids.length === 1 ? "consulta corrigida" : "consultas corrigidas"}.`);
+  };
   const persistProcs = async (next) => { setProcs(next); try { await store.set(PROCS_KEY, JSON.stringify(next)); } catch (_) {} };
   // Renomear no cadastro tem que renomear nas consultas ja salvas, senao elas
   // viram "fora do cadastro" e somem da contagem.
@@ -600,7 +608,7 @@ export default function App() {
         ) : view === "chamar" ? (
           <ChamarView items={items} onAgendar={openNewFor} onHistory={openHistory} />
         ) : view === "pagamentos" ? (
-          <PaymentsView items={items} query={query} onEdit={setModal} />
+          <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
         ) : view === "estoque" ? (
           <EstoqueView estoque={estoque} onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
         ) : view === "procedimentos" ? (
@@ -870,8 +878,30 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar 
 }
 
 // ---- Pagamentos ------------------------------------------------------------
-function PaymentsView({ items, query, onEdit }) {
+function PaymentsView({ items, query, onEdit, onCorrigirStatus }) {
   const [filtro, setFiltro] = useState("aReceber");
+  const [revisando, setRevisando] = useState(false);
+  const [marcadas, setMarcadas] = useState({});
+
+  // Consultas que ficaram "Concluido" com saldo em aberto. Vinha do bug em que
+  // escolher a conta do pagamento concluia a consulta mesmo com sinal parcial.
+  const inconsistentes = useMemo(
+    () => items.filter((it) => it.status === "concluido" && valorDe(it) > 0 && saldoDe(it) > 0)
+               .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || ""))),
+    [items]
+  );
+  const abrirRevisao = () => {
+    const m = {};
+    for (const it of inconsistentes) m[it.id] = true; // todas marcadas por padrao
+    setMarcadas(m);
+    setRevisando(true);
+  };
+  const aplicar = () => {
+    const ids = inconsistentes.filter((it) => marcadas[it.id]).map((it) => it.id);
+    if (ids.length) onCorrigirStatus(ids);
+    setRevisando(false);
+  };
+  const qtdMarcadas = inconsistentes.filter((it) => marcadas[it.id]).length;
   const q = query.trim().toLowerCase();
   const withValue = useMemo(
     () => items.filter((it) => it.status !== "cancelado" && valorDe(it) > 0).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)),
@@ -888,6 +918,62 @@ function PaymentsView({ items, query, onEdit }) {
   return (
     <div className="ag-fade">
       <div className="ff-d text-xl mb-3" style={{ fontWeight: 600 }}>Pagamentos</div>
+
+      {inconsistentes.length > 0 && !revisando && (
+        <div className="rounded-2xl p-3.5 mb-4" style={{ background: C.coralSoft, border: `1px solid ${C.coral}33` }}>
+          <div className="flex items-start gap-2">
+            <AlertCircle size={16} className="shrink-0 mt-0.5" style={{ color: C.coral }} />
+            <div className="flex-1">
+              <div className="text-sm font-medium" style={{ color: C.coral }}>
+                {inconsistentes.length} {inconsistentes.length === 1 ? "consulta está concluída" : "consultas estão concluídas"} com saldo em aberto
+              </div>
+              <div className="text-xs mt-1" style={{ color: C.muted }}>
+                Provavelmente ficaram assim por causa do sinal, que antes concluía a consulta sozinho.
+              </div>
+              <button onClick={abrirRevisao} className="text-xs rounded-lg px-3 py-1.5 font-medium mt-2.5"
+                      style={{ background: C.coral, color: "#fff" }}>
+                Revisar {inconsistentes.length === 1 ? "" : "as " + inconsistentes.length}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {revisando && (
+        <div className="rounded-2xl mb-4" style={{ background: C.surface, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+          <div className="p-3.5" style={{ borderBottom: `1px solid ${C.line}` }}>
+            <div className="text-sm font-medium" style={{ color: C.ink }}>Voltar para Confirmado</div>
+            <div className="text-xs mt-1" style={{ color: C.muted }}>
+              Desmarque as que realmente foram concluídas mesmo com valor em aberto.
+            </div>
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto" }} className="ag-scroll">
+            {inconsistentes.map((it) => (
+              <label key={it.id} className="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer"
+                     style={{ borderBottom: `1px solid ${C.line}` }}>
+                <input type="checkbox" checked={!!marcadas[it.id]}
+                       onChange={() => setMarcadas((p) => ({ ...p, [it.id]: !p[it.id] }))}
+                       style={{ accentColor: C.coral, width: 16, height: 16 }} />
+                <span className="flex-1 min-w-0">
+                  <span className="text-sm block truncate" style={{ color: C.ink }}>{it.patient}</span>
+                  <span className="text-xs" style={{ color: C.muted }}>
+                    {shortDate(it.date)} · {brl(it.valor)} · pago {brl(totalPagoDe(it))} · falta {brl(saldoDe(it))}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="p-3 flex gap-2">
+            <button onClick={() => setRevisando(false)} className="flex-1 rounded-xl py-2.5 text-sm font-medium"
+                    style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>Cancelar</button>
+            <button onClick={aplicar} disabled={qtdMarcadas === 0} className="flex-1 rounded-xl py-2.5 text-sm font-medium"
+                    style={{ background: qtdMarcadas === 0 ? C.line : C.ink, color: qtdMarcadas === 0 ? C.muted : "#fff" }}>
+              Corrigir {qtdMarcadas || ""}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 mb-4">
         <StatCard label="A receber" value={brl(totalReceber)} tone="coral" />
         <StatCard label="Já recebido" value={brl(totalRecebido)} tone="good" />
