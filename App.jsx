@@ -41,7 +41,7 @@ const STATUS = {
   cancelado:  { label: "Cancelado", bg: "#EFEBEA", fg: "#8B8188", dot: "#B4A9AE" },
 };
 
-const PROCS = [
+const PROCS_PADRAO = [
   { nome: "Harmonização Full Face – 3ml", vista: 1200, parc: 1300 },
   { nome: "Preenchimento labial", vista: 600, parc: 650 },
   { nome: "Preenchimento (demais regiões)", vista: 500, parc: 550 },
@@ -52,7 +52,9 @@ const PROCS = [
   { nome: "Harmonização Natural (1ml + Botox)", vista: 1050, parc: 1150 },
   { nome: "Protocolo Avançado (3ml + Bioestimulador DIAMOND)", vista: 1950, parc: 2100 },
 ];
-const procByName = (n) => PROCS.find((p) => p.nome === n);
+// Catalogo agora e editavel e mora no banco; PROCS_PADRAO e so a semente do
+// primeiro acesso. procByName recebe a lista para nao depender de global.
+const procByNameIn = (lista, n) => (lista || []).find((p) => p.nome === n);
 
 const DIAS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho",
@@ -231,6 +233,7 @@ const STORAGE_KEY = "agenda:consultas:v2";
 const NOTES_KEY = "agenda:afazeres:v1";
 const PEOPLE_KEY = "agenda:pacientes:v1";
 const STOCK_KEY = "agenda:estoque:v1";
+const PROCS_KEY = "agenda:procedimentos:v1";
 
 // ---- App -------------------------------------------------------------------
 export default function App() {
@@ -252,6 +255,7 @@ export default function App() {
   const [patientForm, setPatientForm] = useState(null);
   const [estoque, setEstoque] = useState([]);
   const [estoqueForm, setEstoqueForm] = useState(null);
+  const [procs, setProcs] = useState(PROCS_PADRAO);
   const [auth, setAuth] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -285,14 +289,15 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e] = await Promise.all([
-        ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY),
+      const [c, n, p, e, pr] = await Promise.all([
+        ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
       const vn = parse(n); if (vn) setNotas(vn);
       const vp = parse(p); if (vp) setPeople(vp);
       const ve = parse(e); if (ve) setEstoque(ve);
+      const vpr = parse(pr); if (vpr && vpr.length) setProcs(vpr);
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -332,6 +337,20 @@ export default function App() {
     persistPeople(next); setPatientForm(null); flash("Paciente cadastrado.");
   };
   const weekShift = (dir) => { const d = parseKey(selected); d.setDate(d.getDate() + dir * (weekSpan >= 7 ? 7 : weekSpan)); setSelected(keyOf(d)); setCursor({ y: d.getFullYear(), m: d.getMonth() }); };
+  const persistProcs = async (next) => { setProcs(next); try { await store.set(PROCS_KEY, JSON.stringify(next)); } catch (_) {} };
+  // Renomear no cadastro tem que renomear nas consultas ja salvas, senao elas
+  // viram "fora do cadastro" e somem da contagem.
+  const renameProc = async (antigo, novo) => {
+    if (!antigo || !novo || antigo === novo) return;
+    const troca = (x) => (x === antigo ? novo : x);
+    const next = items.map((it) => ({
+      ...it,
+      procedure: troca(it.procedure),
+      procedures: (it.procedures || []).map(troca),
+    }));
+    setItems(next);
+    try { await store.set(STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
+  };
   const persistEstoque = async (next) => { setEstoque(next); try { await store.set(STOCK_KEY, JSON.stringify(next)); } catch (_) {} };
   const addEstoque = (it) => persistEstoque([...estoque, { ...it, id: uid() }]);
   const setEstoqueQtd = (id, qtd) => persistEstoque(estoque.map((i) => (i.id === id ? { ...i, qtd: Math.max(0, qtd) } : i)));
@@ -586,7 +605,8 @@ export default function App() {
           <EstoqueView estoque={estoque} onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
         ) : view === "procedimentos" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
-            <ProcedimentosView items={items} procs={PROCS.map((x) => x.nome)} C={C} />
+            <ProcedimentosView items={items} procs={procs} onSaveProcs={persistProcs}
+                              onRename={renameProc} C={C} />
           </Suspense>
         ) : view === "exportar" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
@@ -598,7 +618,7 @@ export default function App() {
       </main>
 
       {modal && (
-        <FormModal initial={modal} onClose={() => setModal(null)} onSave={save}
+        <FormModal initial={modal} procs={procs} onClose={() => setModal(null)} onSave={save}
                    onDelete={modal.id ? () => { remove(modal.id); setModal(null); } : null} />
       )}
 
@@ -1673,7 +1693,8 @@ function Field({ label, children }) {
   );
 }
 
-function FormModal({ initial, onClose, onSave, onDelete }) {
+function FormModal({ initial, procs, onClose, onSave, onDelete }) {
+  const procByName = (n) => procByNameIn(procs, n);
   const [f, setF] = useState(() => {
     const base = {
       patient: "", phone: "", instagram: "", date: "", time: "09:00", endTime: "10:00",
@@ -1755,7 +1776,7 @@ function FormModal({ initial, onClose, onSave, onDelete }) {
                       else { setCustomProc(false); setF((prev) => recalc({ ...prev, procedure: v })); }
                     }}>
               <option value="">Selecione…</option>
-              {PROCS.map((p) => <option key={p.nome} value={p.nome}>{p.nome} — {brl(p.vista)}</option>)}
+              {procs.map((p) => <option key={p.nome} value={p.nome}>{p.nome} — {brl(p.vista)}</option>)}
               <option value="__outro">Outro (digitar)</option>
             </select>
             {customProc && (
@@ -1767,7 +1788,7 @@ function FormModal({ initial, onClose, onSave, onDelete }) {
                 <select value={nm} style={{ ...inputStyle, flex: 1 }}
                         onChange={(e) => setF((prev) => { const arr = [...(prev.procedures || [])]; arr[idx] = e.target.value; return recalc({ ...prev, procedures: arr }); })}>
                   <option value="">Procedimento adicional…</option>
-                  {PROCS.map((p) => <option key={p.nome} value={p.nome}>{p.nome} — {brl(p.vista)}</option>)}
+                  {procs.map((p) => <option key={p.nome} value={p.nome}>{p.nome} — {brl(p.vista)}</option>)}
                 </select>
                 <button onClick={() => setF((prev) => recalc({ ...prev, procedures: (prev.procedures || []).filter((_, j) => j !== idx) }))}
                         className="w-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.bg, color: C.faint }}><X size={15} /></button>
