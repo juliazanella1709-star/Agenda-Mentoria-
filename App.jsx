@@ -3,6 +3,7 @@ import {
   Calendar, Plus, Phone, Trash2, Pencil, ChevronLeft, ChevronRight,
   Search, X, Check, CalendarDays, User, Instagram, AlertCircle,
   Users, Wallet, TrendingUp, List, Clock, RotateCcw, PhoneCall, MessageCircle, Package, Minus, Eye, EyeOff, LogOut,
+  FileSpreadsheet,
 } from "lucide-react";
 import { auth as fbAuth } from "./firebase";
 import { store } from "./store";
@@ -10,6 +11,8 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebas
 
 // Carregado sob demanda: o recharts so desce ao abrir a aba Faturamento.
 const FaturamentoChart = React.lazy(() => import("./Chart"));
+// Idem: a biblioteca de Excel so desce ao abrir a aba Exportar.
+const ExportView = React.lazy(() => import("./Export"));
 
 // ---- Tema ------------------------------------------------------------------
 const C = {
@@ -381,6 +384,7 @@ export default function App() {
     { id: "pagamentos", label: "Pagamentos", icon: Wallet },
     { id: "faturamento", label: "Faturamento", icon: TrendingUp },
     { id: "estoque", label: "Estoque", icon: Package },
+    { id: "exportar", label: "Exportar", icon: FileSpreadsheet },
   ];
 
   // Espera so a sessao resolver (rapido, e local). Os dados NAO seguram mais a
@@ -578,6 +582,10 @@ export default function App() {
           <PaymentsView items={items} query={query} onEdit={setModal} />
         ) : view === "estoque" ? (
           <EstoqueView estoque={estoque} onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
+        ) : view === "exportar" ? (
+          <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
+            <ExportView items={items} estoque={estoque} C={C} />
+          </Suspense>
         ) : (
           <BillingView items={items} />
         )}
