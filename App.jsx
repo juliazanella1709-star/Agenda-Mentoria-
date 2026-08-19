@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, Suspense } from "react";
 import {
   Calendar, Plus, Phone, Trash2, Pencil, ChevronLeft, ChevronRight,
   Search, X, Check, CalendarDays, User, Instagram, AlertCircle,
   Users, Wallet, TrendingUp, List, Clock, RotateCcw, PhoneCall, MessageCircle, Package, Minus, Eye, EyeOff, LogOut,
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { auth as fbAuth } from "./firebase";
 import { store } from "./store";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+
+// Carregado sob demanda: o recharts so desce ao abrir a aba Faturamento.
+const FaturamentoChart = React.lazy(() => import("./Chart"));
 
 // ---- Tema ------------------------------------------------------------------
 const C = {
@@ -247,6 +249,7 @@ export default function App() {
   const [estoque, setEstoque] = useState([]);
   const [estoqueForm, setEstoqueForm] = useState(null);
   const [auth, setAuth] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     const l = document.createElement("link");
@@ -271,14 +274,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!auth) return;
+    let cancelado = false;
+    setLoading(true);
+    const ler = (k) => store.get(k).catch(() => null);
+    const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
-      try { const r = await store.get(STORAGE_KEY); if (r && r.value) setItems(JSON.parse(r.value)); } catch (_) {}
-      try { const r = await store.get(NOTES_KEY); if (r && r.value) setNotas(JSON.parse(r.value)); } catch (_) {}
-      try { const r = await store.get(PEOPLE_KEY); if (r && r.value) setPeople(JSON.parse(r.value)); } catch (_) {}
-      try { const r = await store.get(STOCK_KEY); if (r && r.value) setEstoque(JSON.parse(r.value)); } catch (_) {}
+      // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
+      const [c, n, p, e] = await Promise.all([
+        ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY),
+      ]);
+      if (cancelado) return;
+      const vc = parse(c); if (vc) setItems(vc);
+      const vn = parse(n); if (vn) setNotas(vn);
+      const vp = parse(p); if (vp) setPeople(vp);
+      const ve = parse(e); if (ve) setEstoque(ve);
       setLoading(false);
     })();
-  }, []);
+    return () => { cancelado = true; };
+  }, [auth]);
 
   const persist = async (next) => {
     setItems(next);
@@ -324,7 +338,10 @@ export default function App() {
     catch (_) { return false; }
   };
   const logout = async () => { await signOut(fbAuth); setAuth(null); };
-  useEffect(() => { const unsub = onAuthStateChanged(fbAuth, (u) => setAuth(u ? u.email : null)); return () => unsub(); }, []);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(fbAuth, (u) => { setAuth(u ? u.email : null); setAuthReady(true); });
+    return () => unsub();
+  }, []);
 
   const countByDate = useMemo(() => {
     const m = {};
@@ -366,7 +383,9 @@ export default function App() {
     { id: "estoque", label: "Estoque", icon: Package },
   ];
 
-  if (loading) return (
+  // Espera so a sessao resolver (rapido, e local). Os dados NAO seguram mais a
+  // tela: a interface aparece na hora e o conteudo entra quando chega.
+  if (!authReady) return (
     <div className="ff-b" style={{ minHeight: "100vh", background: C.ink, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
       <div className="text-sm" style={{ opacity: 0.7 }}>Carregando…</div>
     </div>
@@ -923,16 +942,9 @@ function BillingView({ items }) {
       <div className="rounded-2xl p-4 mb-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="text-sm font-medium mb-3" style={{ color: C.ink }}>Faturamento — últimos 6 meses</div>
         <div style={{ width: "100%", height: 200 }}>
-          <ResponsiveContainer>
-            <BarChart data={chart} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
-              <XAxis dataKey="mes" tick={{ fontSize: 12, fill: C.muted }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: C.faint }} axisLine={false} tickLine={false} width={46}
-                     tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v)} />
-              <Tooltip formatter={(v) => [brl(v), "Faturado"]} cursor={{ fill: "#0000000a" }}
-                       contentStyle={{ borderRadius: 12, border: `1px solid ${C.line}`, fontSize: 12 }} />
-              <Bar dataKey="faturado" radius={[6, 6, 0, 0]} fill={C.coral} maxBarSize={44} />
-            </BarChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<div className="h-full flex items-center justify-center text-xs" style={{ color: C.muted }}>Carregando gráfico…</div>}>
+            <FaturamentoChart data={chart} C={C} brl={brl} />
+          </Suspense>
         </div>
       </div>
 
