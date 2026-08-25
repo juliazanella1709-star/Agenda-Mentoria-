@@ -19,11 +19,18 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 
 const FORMAS = ["Pix", "Dinheiro", "Crédito", "Débito", "Transferência"];
 
-// Total devido: matricula + o curso, conforme a modalidade escolhida.
-const totalDe = (a, curso) =>
-  toNum(curso.matricula) + (a.modalidade === "avista" ? toNum(curso.avista) : toNum(curso.parcelado));
-const pagoDe = (a) => (a.pagamentos || []).reduce((s, p) => s + toNum(p.valor), 0);
-const saldoDe = (a, curso) => Math.max(totalDe(a, curso) - pagoDe(a), 0);
+// Cada aluna pode ter valores proprios; vazio significa "usa o padrao do curso".
+const usa = (v, padrao) => (v === "" || v === null || v === undefined ? toNum(padrao) : toNum(v));
+const matriculaDe = (a, curso) => usa(a.valorMatricula, curso.matricula);
+const cursoDe = (a, curso) => usa(a.valorCurso, a.modalidade === "avista" ? curso.avista : curso.parcelado);
+const parcelasDe = (a, curso) => Math.max(1, parseInt(a.parcelas, 10) || parseInt(curso.maxParcelas, 10) || 1);
+const valorParcelaDe = (a, curso) => cursoDe(a, curso) / parcelasDe(a, curso);
+
+const totalDe = (a, curso) => matriculaDe(a, curso) + cursoDe(a, curso);
+// A matricula marcada como paga conta sozinha, sem precisar de lancamento.
+const pagoCursoDe = (a) => (a.pagamentos || []).reduce((s, p) => s + toNum(p.valor), 0);
+const pagoDe = (a, curso) => (a.matriculaPaga ? matriculaDe(a, curso) : 0) + pagoCursoDe(a);
+const saldoDe = (a, curso) => Math.max(totalDe(a, curso) - pagoDe(a, curso), 0);
 
 export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C }) {
   const [tela, setTela] = useState("lista");   // lista | valores
@@ -33,7 +40,7 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
 
   const totais = useMemo(() => {
     const previsto = (alunas || []).reduce((s, a) => s + totalDe(a, curso), 0);
-    const recebido = (alunas || []).reduce((s, a) => s + pagoDe(a), 0);
+    const recebido = (alunas || []).reduce((s, a) => s + pagoDe(a, curso), 0);
     return { previsto, recebido, aReceber: Math.max(previsto - recebido, 0) };
   }, [alunas, curso]);
 
@@ -43,7 +50,13 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
   const salvarAluna = () => {
     const nome = (form.nome || "").trim();
     if (!nome) return;
-    const base = { nome, telefone: form.telefone || "", modalidade: form.modalidade || "parcelado", obs: form.obs || "" };
+    const base = {
+      nome, telefone: form.telefone || "", modalidade: form.modalidade || "parcelado", obs: form.obs || "",
+      matriculaPaga: !!form.matriculaPaga, matriculaData: form.matriculaData || "",
+      valorMatricula: form.valorMatricula === "" ? "" : toNum(form.valorMatricula),
+      valorCurso: form.valorCurso === "" ? "" : toNum(form.valorCurso),
+      parcelas: form.parcelas === "" ? "" : Math.max(1, parseInt(form.parcelas, 10) || 1),
+    };
     const next = form.id
       ? (alunas || []).map((a) => (a.id === form.id ? { ...a, ...base } : a))
       : [...(alunas || []), { ...base, id: uid(), pagamentos: [] }];
@@ -79,7 +92,8 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
         <Mini label="A receber" value={brl(totais.aReceber)} C={C} cor={totais.aReceber > 0 ? C.coral : C.muted} />
       </div>
 
-      <button onClick={() => setForm({ nome: "", telefone: "", modalidade: "parcelado", obs: "" })}
+      <button onClick={() => setForm({ nome: "", telefone: "", modalidade: "parcelado", obs: "",
+                                       matriculaPaga: false, matriculaData: "", valorMatricula: "", valorCurso: "", parcelas: "" })}
               className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
               style={{ background: C.ink, color: "#fff" }}>
         <Plus size={17} /> Nova aluna
@@ -93,7 +107,7 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
 
       <div className="space-y-2">
         {(alunas || []).map((a) => {
-          const total = totalDe(a, curso), pago = pagoDe(a), saldo = saldoDe(a, curso);
+          const total = totalDe(a, curso), pago = pagoDe(a, curso), saldo = saldoDe(a, curso);
           const quit = saldo <= 0;
           const pct = total > 0 ? Math.min((pago / total) * 100, 100) : 0;
           return (
@@ -102,7 +116,8 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
                 <button onClick={() => setAberta(a.id)} className="flex-1 min-w-0 text-left">
                   <div className="font-semibold truncate" style={{ color: C.ink }}>{a.nome}</div>
                   <div className="text-xs mt-0.5" style={{ color: C.muted }}>
-                    {a.modalidade === "avista" ? "Pix à vista" : `Parcelado até ${curso.maxParcelas}x`}
+                    {a.modalidade === "avista" ? "Pix à vista" : `${parcelasDe(a, curso)}x de ${brl(valorParcelaDe(a, curso))}`}
+                    {a.matriculaPaga ? " · matrícula paga" : " · matrícula em aberto"}
                     {a.telefone ? ` · ${a.telefone}` : ""}
                   </div>
                 </button>
@@ -144,10 +159,60 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
                                border: `1px solid ${form.modalidade === k ? C.ink : C.line}` }}>{l}</button>
             ))}
           </div>
-          <div className="text-xs mt-2" style={{ color: C.muted }}>
-            Com a matrícula de {brl(curso.matricula)}, o total fica{" "}
-            <b style={{ color: C.ink }}>{brl(totalDe({ modalidade: form.modalidade }, curso))}</b>.
+          {form.modalidade === "parcelado" && (
+            <label className="block mt-3">
+              <div className="text-xs mb-1" style={{ color: C.muted }}>Em quantas vezes</div>
+              <input inputMode="numeric" value={form.parcelas}
+                     onChange={(e) => setForm({ ...form, parcelas: e.target.value.replace(/\D/g, "") })}
+                     placeholder={`padrão: ${curso.maxParcelas}x`} style={input} />
+              <div className="text-xs mt-1" style={{ color: C.faint }}>
+                {parcelasDe(form, curso)}x de <b style={{ color: C.muted }}>{brl(valorParcelaDe(form, curso))}</b>
+              </div>
+            </label>
+          )}
+
+          <div className="rounded-xl p-3 mt-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>
+              Valores desta aluna — deixe em branco para usar o padrão do curso
+            </div>
+            <div className="flex gap-2">
+              <label className="flex-1">
+                <div className="text-xs mb-1" style={{ color: C.muted }}>Matrícula (R$)</div>
+                <input inputMode="decimal" value={form.valorMatricula}
+                       onChange={(e) => setForm({ ...form, valorMatricula: e.target.value })}
+                       placeholder={String(curso.matricula)} style={{ ...input, background: C.surface }} />
+              </label>
+              <label className="flex-1">
+                <div className="text-xs mb-1" style={{ color: C.muted }}>Curso (R$)</div>
+                <input inputMode="decimal" value={form.valorCurso}
+                       onChange={(e) => setForm({ ...form, valorCurso: e.target.value })}
+                       placeholder={String(form.modalidade === "avista" ? curso.avista : curso.parcelado)}
+                       style={{ ...input, background: C.surface }} />
+              </label>
+            </div>
+            <div className="text-xs mt-2" style={{ color: C.muted }}>
+              Total desta aluna: <b style={{ color: C.ink }}>{brl(totalDe(form, curso))}</b>
+            </div>
           </div>
+
+          <label className="flex items-start gap-2.5 cursor-pointer rounded-xl p-2.5 mt-3"
+                 style={{ background: form.matriculaPaga ? C.tealSoft : C.bg, border: `1px solid ${form.matriculaPaga ? C.teal + "44" : C.line}` }}>
+            <input type="checkbox" checked={!!form.matriculaPaga}
+                   onChange={(e) => setForm({ ...form, matriculaPaga: e.target.checked, matriculaData: e.target.checked ? (form.matriculaData || hojeKey()) : "" })}
+                   className="mt-0.5" style={{ accentColor: C.teal, width: 16, height: 16 }} />
+            <span className="flex-1">
+              <span className="text-sm block" style={{ color: C.ink }}>Matrícula já paga</span>
+              <span className="text-xs" style={{ color: C.muted }}>
+                Conta {brl(matriculaDe(form, curso))} como pago, sem precisar lançar.
+              </span>
+            </span>
+          </label>
+          {form.matriculaPaga && (
+            <label className="block mt-2">
+              <div className="text-xs mb-1" style={{ color: C.muted }}>Quando pagou a matrícula</div>
+              <input type="date" value={form.matriculaData || ""} onChange={(e) => setForm({ ...form, matriculaData: e.target.value })} style={input} />
+            </label>
+          )}
 
           <div className="text-xs mb-1 mt-3" style={{ color: C.muted }}>Observações</div>
           <input value={form.obs} onChange={(e) => setForm({ ...form, obs: e.target.value })} placeholder="opcional" style={input} />
@@ -181,7 +246,7 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
 // ------------------------------------------------------ detalhe de uma aluna
 function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
   const [pagForm, setPagForm] = useState(null);
-  const total = totalDe(aluna, curso), pago = pagoDe(aluna), saldo = saldoDe(aluna, curso);
+  const total = totalDe(aluna, curso), pago = pagoDe(aluna, curso), saldo = saldoDe(aluna, curso);
   const pagamentos = [...(aluna.pagamentos || [])].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
 
   const salvarPag = () => {
@@ -205,7 +270,7 @@ function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
       <div className="p-4 mb-4" style={card}>
         <div className="ff-d text-lg" style={{ fontWeight: 600, color: C.ink }}>{aluna.nome}</div>
         <div className="text-xs mt-0.5" style={{ color: C.muted }}>
-          {aluna.modalidade === "avista" ? "Pix à vista" : `Parcelado até ${curso.maxParcelas}x`}
+          {aluna.modalidade === "avista" ? "Pix à vista" : `Parcelado em ${parcelasDe(aluna, curso)}x`}
           {aluna.telefone ? ` · ${aluna.telefone}` : ""}
         </div>
         {aluna.obs ? <div className="text-xs mt-1.5" style={{ color: C.muted }}>{aluna.obs}</div> : null}
@@ -217,15 +282,36 @@ function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
         </div>
 
         <div className="text-xs mt-3" style={{ color: C.muted }}>
-          Matrícula {brl(curso.matricula)} + curso {brl(aluna.modalidade === "avista" ? curso.avista : curso.parcelado)}
-          {aluna.modalidade === "parcelado" ? ` (até ${curso.maxParcelas}x de ${brl(toNum(curso.parcelado) / Math.max(toNum(curso.maxParcelas), 1))})` : ""}
+          Matrícula {brl(matriculaDe(aluna, curso))} + curso {brl(cursoDe(aluna, curso))}
+          {aluna.modalidade === "parcelado"
+            ? ` (${parcelasDe(aluna, curso)}x de ${brl(valorParcelaDe(aluna, curso))})`
+            : ""}
+        </div>
+
+        {aluna.modalidade === "parcelado" && (
+          <div className="text-xs mt-1" style={{ color: C.muted }}>
+            Parcelas do curso: <b style={{ color: C.ink }}>
+              {Math.min(Math.floor(pagoCursoDe(aluna) / Math.max(valorParcelaDe(aluna, curso), 1)), parcelasDe(aluna, curso))} de {parcelasDe(aluna, curso)}
+            </b> pagas
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mt-2.5 rounded-lg px-2.5 py-2"
+             style={{ background: aluna.matriculaPaga ? C.goodBg : C.coralSoft }}>
+          <span className="text-xs" style={{ color: aluna.matriculaPaga ? C.goodFg : C.coral, fontWeight: 600 }}>
+            {aluna.matriculaPaga ? "Matrícula paga" : "Matrícula em aberto"}
+          </span>
+          <span className="text-xs" style={{ color: C.muted }}>
+            {brl(matriculaDe(aluna, curso))}
+            {aluna.matriculaPaga && aluna.matriculaData ? ` · ${dataBR(aluna.matriculaData)}` : ""}
+          </span>
         </div>
       </div>
 
       <button onClick={() => setPagForm({ valor: "", data: hojeKey(), forma: "Pix", obs: "" })}
               className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
               style={{ background: C.ink, color: "#fff" }}>
-        <Plus size={17} /> Lançar pagamento
+        <Plus size={17} /> Lançar pagamento do curso
       </button>
 
       <div style={{ ...card, overflow: "hidden" }}>
