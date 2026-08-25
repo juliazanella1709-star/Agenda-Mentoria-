@@ -15,7 +15,8 @@ const toNum = (s) => {
   const n = parseFloat(clean);
   return isNaN(n) ? 0 : n;
 };
-const valorDe = (it) => toNum(it.valor);
+const descontoDe = (it) => Math.min(toNum(it && it.desconto), toNum(it && it.valor));
+const valorDe = (it) => Math.max(toNum(it.valor) - descontoDe(it), 0);
 const pagList = (it) => (it.pagamentos && it.pagamentos.length)
   ? it.pagamentos
   : (toNum(it.sinal) > 0 ? [{ valor: it.sinal, forma: it.formaPgto, conta: it.sinalPara, parcelas: it.parcelas }] : []);
@@ -72,7 +73,8 @@ export default function ExportView({ items, estoque, C }) {
     const valor = filtradas.reduce((s, it) => s + valorDe(it), 0);
     const pago = filtradas.reduce((s, it) => s + totalPagoDe(it), 0);
     const parcerias = filtradas.filter((it) => it.parceria).reduce((s, it) => s + valorDe(it), 0);
-    return { valor, pago, parcerias, saldo: filtradas.reduce((s, it) => s + saldoDe(it), 0) };
+    const descontos = filtradas.reduce((s, it) => s + descontoDe(it), 0);
+    return { valor, pago, parcerias, descontos, saldo: filtradas.reduce((s, it) => s + saldoDe(it), 0) };
   }, [filtradas]);
 
   const nadaSelecionado = !Object.values(abas).some(Boolean);
@@ -94,6 +96,8 @@ export default function ExportView({ items, estoque, C }) {
             "Paciente": it.patient || "",
             "Telefone": it.phone || "",
             "Procedimentos": procsLabel(it),
+            "Valor de tabela (R$)": toNum(it.valor),
+            "Desconto (R$)": descontoDe(it),
             "Valor (R$)": valorDe(it),
             "Pago (R$)": totalPagoDe(it),
             "Saldo (R$)": saldoDe(it),
@@ -157,6 +161,7 @@ export default function ExportView({ items, estoque, C }) {
           { "Item": "Total recebido (R$)", "Valor": totais.pago },
           { "Item": "Saldo a receber (R$)", "Valor": totais.saldo },
           { "Item": "Parcerias no período (R$)", "Valor": totais.parcerias },
+          { "Item": "Descontos concedidos (R$)", "Valor": totais.descontos },
           { "Item": "", "Valor": "" },
           { "Item": "— Recebido por forma —", "Valor": "" },
           ...Object.entries(porForma).map(([k, v]) => ({ "Item": k, "Valor": v })),

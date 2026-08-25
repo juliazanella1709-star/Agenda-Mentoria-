@@ -89,7 +89,10 @@ const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []
 const procsText = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" ");
 const initials = (name) => (name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase() || "?";
 
-const valorDe = (it) => toNum(it.valor);
+// it.valor = preco de tabela; it.desconto = abatimento. valorDe e o que a
+// paciente realmente deve, que e o numero que interessa em todo o resto.
+const descontoDe = (it) => Math.min(toNum(it && it.desconto), toNum(it && it.valor));
+const valorDe = (it) => Math.max(toNum(it.valor) - descontoDe(it), 0);
 const pagList = (it) => (it.pagamentos && it.pagamentos.length) ? it.pagamentos : (toNum(it.sinal) > 0 ? [{ valor: it.sinal, forma: it.formaPgto, conta: it.sinalPara, parcelas: it.parcelas }] : []);
 const pagResumo = (it) => pagList(it).filter((p) => toNum(p.valor) > 0).map((p) => `${p.forma || "?"}${p.conta ? " " + p.conta : ""}`).join(" + ");
 const totalPagoDe = (it) => pagList(it).reduce((s, p) => s + toNum(p.valor), 0);
@@ -141,7 +144,8 @@ function billingForMonth(items, ym) {
   const aReceber = list.reduce((s, it) => s + saldoDe(it), 0);
   // Entram no faturado (trabalho entregue) mas nao viram dinheiro nem divida.
   const parcerias = list.filter((it) => it.parceria).reduce((s, it) => s + valorDe(it), 0);
-  return { faturado, recebido, aReceber, parcerias, atend: list.length };
+  const descontos = list.reduce((s, it) => s + descontoDe(it), 0);
+  return { faturado, recebido, aReceber, parcerias, descontos, atend: list.length };
 }
 function last6Months(items, ym) {
   const [y, m] = ym.split("-").map(Number);
@@ -822,7 +826,7 @@ function SearchView({ results, onPick, onOpen }) {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate" style={{ color: C.ink }}>{it.patient}</div>
                   <div className="text-xs truncate" style={{ color: C.muted }}>
-                    {it.time}{it.endTime ? `–${it.endTime}` : ""} · {procsLabel(it) || "—"} {it.instagram ? `· @${igHandle(it.instagram)}` : ""} {toNum(it.valor) > 0 ? `· ${brl(it.valor)}` : ""}
+                    {it.time}{it.endTime ? `–${it.endTime}` : ""} · {procsLabel(it) || "—"} {it.instagram ? `· @${igHandle(it.instagram)}` : ""} {valorDe(it) > 0 ? `· ${brl(valorDe(it))}` : ""}
                   </div>
                 </div>
                 <span className="text-xs rounded-full px-2.5 py-1 shrink-0" style={{ background: s.bg, color: s.fg }}>{s.label}</span>
@@ -977,7 +981,7 @@ function PaymentsView({ items, query, onEdit, onCorrigirStatus }) {
                 <span className="flex-1 min-w-0">
                   <span className="text-sm block truncate" style={{ color: C.ink }}>{it.patient}</span>
                   <span className="text-xs" style={{ color: C.muted }}>
-                    {shortDate(it.date)} · {brl(it.valor)} · pago {brl(totalPagoDe(it))} · falta {brl(saldoDe(it))}
+                    {shortDate(it.date)} · {brl(valorDe(it))} · pago {brl(totalPagoDe(it))} · falta {brl(saldoDe(it))}
                   </span>
                 </span>
               </label>
@@ -1019,7 +1023,7 @@ function PaymentsView({ items, query, onEdit, onCorrigirStatus }) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate" style={{ color: C.ink }}>{it.patient}</div>
-                  <div className="text-xs truncate" style={{ color: C.muted }}>{procsLabel(it) || "—"} · {brl(it.valor)}{it.parceria ? " · parceria" : ""}{totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}</div>
+                  <div className="text-xs truncate" style={{ color: C.muted }}>{procsLabel(it) || "—"} · {brl(valorDe(it))}{descontoDe(it) > 0 ? ` · desc. ${brl(descontoDe(it))}` : ""}{it.parceria ? " · parceria" : ""}{totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}</div>
                 </div>
                 {quit ? (
                   <span className="text-xs rounded-full px-2.5 py-1 shrink-0 flex items-center gap-1" style={{ background: C.goodBg, color: C.goodFg }}><Check size={11} /> quitado</span>
@@ -1077,6 +1081,7 @@ function BillingView({ items }) {
         <StatCard label="Recebido" value={brl(stats.recebido)} tone="good" />
         <StatCard label="A receber" value={brl(stats.aReceber)} tone="coral" />
         {stats.parcerias > 0 && <StatCard label="Parcerias" value={brl(stats.parcerias)} tone="teal" />}
+        {stats.descontos > 0 && <StatCard label="Descontos" value={brl(stats.descontos)} tone="coral" />}
         <StatCard label="Atendimentos" value={String(stats.atend)} tone="teal" />
       </div>
 
@@ -1479,7 +1484,7 @@ function PatientHistory({ name, items, onClose, onAgendar, onOpenConsulta }) {
                 {procsLabel(it) && <div className="text-sm mt-0.5" style={{ color: C.teal }}>{procsLabel(it)}</div>}
                 {valorDe(it) > 0 && (
                   <div className="text-xs mt-1" style={{ color: C.muted }}>
-                    {brl(it.valor)}
+                    {brl(valorDe(it))}
                     {it.parceria ? " · parceria" : ""}{totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}
                     {saldoC > 0 ? ` · resta ${brl(saldoC)}` : " · quitado"}
                   </div>
@@ -1864,7 +1869,7 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
   const [f, setF] = useState(() => {
     const base = {
       patient: "", phone: "", instagram: "", date: "", time: "09:00", endTime: "10:00",
-      procedure: "", procedures: [], valor: "", precoModo: "vista", pagamentos: [], parceria: false, aviso: "", notes: "", status: "pendente", ...initial,
+      procedure: "", procedures: [], valor: "", desconto: "", precoModo: "vista", pagamentos: [], parceria: false, aviso: "", notes: "", status: "pendente", ...initial,
     };
     if ((!base.pagamentos || !base.pagamentos.length) && toNum(base.sinal) > 0) {
       base.pagamentos = [{ valor: base.sinal, forma: base.formaPgto || "", conta: base.sinalPara || "", parcelas: base.parcelas || "" }];
@@ -1931,7 +1936,8 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
   const removePag = (idx) => setPagamentos((f.pagamentos || []).filter((_, j) => j !== idx));
   const inputStyle = { width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink };
   const totalPago = (f.pagamentos || []).reduce((s, p) => s + toNum(p.valor), 0);
-  const saldo = toNum(f.valor) - totalPago;
+  const valorComDesconto = Math.max(toNum(f.valor) - Math.min(toNum(f.desconto), toNum(f.valor)), 0);
+  const saldo = valorComDesconto - totalPago;
 
   const submit = () => {
     if (!f.patient.trim()) return setErr("Informe o nome do paciente.");
@@ -2050,9 +2056,21 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
                       style={{ background: f.precoModo === k ? C.ink : C.bg, color: f.precoModo === k ? "#fff" : C.muted, border: `1px solid ${f.precoModo === k ? C.ink : C.line}` }}>{l}</button>
             ))}
           </div>
-          <Field label="Valor total (R$)">
-            <input inputMode="decimal" value={f.valor} onChange={(e) => set("valor", e.target.value)} placeholder="0,00" style={inputStyle} />
-          </Field>
+          <div className="grid grid-cols-2 gap-2.5">
+            <Field label="Valor total (R$)">
+              <input inputMode="decimal" value={f.valor} onChange={(e) => set("valor", e.target.value)} placeholder="0,00" style={inputStyle} />
+            </Field>
+            <Field label="Desconto (R$)">
+              <input inputMode="decimal" value={f.desconto} onChange={(e) => set("desconto", e.target.value)} placeholder="0,00"
+                     style={{ ...inputStyle, background: toNum(f.desconto) > 0 ? C.coralSoft : C.bg }} />
+            </Field>
+          </div>
+
+          {toNum(f.desconto) > 0 && !f.parceria && (
+            <div className="text-xs -mt-1" style={{ color: C.muted }}>
+              {brl(f.valor)} − {brl(f.desconto)} = <b style={{ color: C.ink }}>{brl(valorComDesconto)}</b> a cobrar
+            </div>
+          )}
 
           <label className="flex items-start gap-2.5 cursor-pointer rounded-xl p-2.5"
                  style={{ background: f.parceria ? C.tealSoft : C.bg, border: `1px solid ${f.parceria ? C.teal + "44" : C.line}` }}>
@@ -2098,19 +2116,19 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
             </button>
           </div>
 
-          {toNum(f.valor) > 0 && f.parceria && (
+          {valorComDesconto > 0 && f.parceria && (
             <div className="rounded-xl p-3.5" style={{ background: C.tealSoft, border: `1px solid ${C.teal}33` }}>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold" style={{ color: C.teal }}>Parceria · sem cobrança</span>
-                <span className="ff-d" style={{ fontSize: 22, fontWeight: 700, color: C.teal }}>{brl(f.valor)}</span>
+                <span className="ff-d" style={{ fontSize: 22, fontWeight: 700, color: C.teal }}>{brl(valorComDesconto)}</span>
               </div>
             </div>
           )}
 
-          {toNum(f.valor) > 0 && !f.parceria && (
+          {valorComDesconto > 0 && !f.parceria && (
             <div className="rounded-xl p-3.5" style={{ background: saldo <= 0 ? C.goodBg : C.coralSoft, border: `1px solid ${(saldo <= 0 ? C.goodFg : C.coral) + "33"}` }}>
               <div className="flex justify-between text-xs mb-2" style={{ color: C.muted }}>
-                <span>Total {brl(f.valor)}</span>
+                <span>Total {brl(valorComDesconto)}</span>
                 <span>Pago {brl(totalPago)}</span>
               </div>
               <div className="flex items-center justify-between">
