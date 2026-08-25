@@ -20,6 +20,7 @@ const pagList = (it) => (it.pagamentos && it.pagamentos.length)
   ? it.pagamentos
   : (toNum(it.sinal) > 0 ? [{ valor: it.sinal, forma: it.formaPgto, conta: it.sinalPara, parcelas: it.parcelas }] : []);
 const totalPagoDe = (it) => pagList(it).reduce((s, p) => s + toNum(p.valor), 0);
+const saldoDe = (it) => (it && it.parceria ? 0 : Math.max(valorDe(it) - totalPagoDe(it), 0));
 const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" + ");
 const brl = (v) => toNum(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const dataBR = (k) => { const [y, m, d] = String(k).split("-"); return `${d}/${m}/${y}`; };
@@ -70,7 +71,8 @@ export default function ExportView({ items, estoque, C }) {
   const totais = useMemo(() => {
     const valor = filtradas.reduce((s, it) => s + valorDe(it), 0);
     const pago = filtradas.reduce((s, it) => s + totalPagoDe(it), 0);
-    return { valor, pago, saldo: Math.max(valor - pago, 0) };
+    const parcerias = filtradas.filter((it) => it.parceria).reduce((s, it) => s + valorDe(it), 0);
+    return { valor, pago, parcerias, saldo: filtradas.reduce((s, it) => s + saldoDe(it), 0) };
   }, [filtradas]);
 
   const nadaSelecionado = !Object.values(abas).some(Boolean);
@@ -94,7 +96,8 @@ export default function ExportView({ items, estoque, C }) {
             "Procedimentos": procsLabel(it),
             "Valor (R$)": valorDe(it),
             "Pago (R$)": totalPagoDe(it),
-            "Saldo (R$)": Math.max(valorDe(it) - totalPagoDe(it), 0),
+            "Saldo (R$)": saldoDe(it),
+            "Parceria": it.parceria ? "SIM" : "",
             "Formas de pagamento": pgs.map((p) => p.forma || "?").join(" + "),
             "Contas": pgs.map((p) => p.conta || "").filter(Boolean).join(" + "),
             "Status": STATUS_LABEL[it.status] || it.status || "",
@@ -153,6 +156,7 @@ export default function ExportView({ items, estoque, C }) {
           { "Item": "Valor total (R$)", "Valor": totais.valor },
           { "Item": "Total recebido (R$)", "Valor": totais.pago },
           { "Item": "Saldo a receber (R$)", "Valor": totais.saldo },
+          { "Item": "Parcerias no período (R$)", "Valor": totais.parcerias },
           { "Item": "", "Valor": "" },
           { "Item": "— Recebido por forma —", "Valor": "" },
           ...Object.entries(porForma).map(([k, v]) => ({ "Item": k, "Valor": v })),

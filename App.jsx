@@ -94,7 +94,8 @@ const pagList = (it) => (it.pagamentos && it.pagamentos.length) ? it.pagamentos 
 const pagResumo = (it) => pagList(it).filter((p) => toNum(p.valor) > 0).map((p) => `${p.forma || "?"}${p.conta ? " " + p.conta : ""}`).join(" + ");
 const totalPagoDe = (it) => pagList(it).reduce((s, p) => s + toNum(p.valor), 0);
 const recebidoDe = (it) => { const v = valorDe(it), pg = totalPagoDe(it); return v > 0 ? Math.min(pg, v) : pg; };
-const saldoDe = (it) => Math.max(valorDe(it) - totalPagoDe(it), 0);
+// Parceria: o trabalho tem valor, mas nao ha nada a cobrar da paciente.
+const saldoDe = (it) => (it && it.parceria ? 0 : Math.max(valorDe(it) - totalPagoDe(it), 0));
 
 function derivePatients(items, people = []) {
   const map = {};
@@ -138,7 +139,9 @@ function billingForMonth(items, ym) {
   const faturado = list.reduce((s, it) => s + valorDe(it), 0);
   const recebido = list.reduce((s, it) => s + recebidoDe(it), 0);
   const aReceber = list.reduce((s, it) => s + saldoDe(it), 0);
-  return { faturado, recebido, aReceber, atend: list.length };
+  // Entram no faturado (trabalho entregue) mas nao viram dinheiro nem divida.
+  const parcerias = list.filter((it) => it.parceria).reduce((s, it) => s + valorDe(it), 0);
+  return { faturado, recebido, aReceber, parcerias, atend: list.length };
 }
 function last6Months(items, ym) {
   const [y, m] = ym.split("-").map(Number);
@@ -1016,7 +1019,7 @@ function PaymentsView({ items, query, onEdit, onCorrigirStatus }) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate" style={{ color: C.ink }}>{it.patient}</div>
-                  <div className="text-xs truncate" style={{ color: C.muted }}>{procsLabel(it) || "—"} · {brl(it.valor)}{totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}</div>
+                  <div className="text-xs truncate" style={{ color: C.muted }}>{procsLabel(it) || "—"} · {brl(it.valor)}{it.parceria ? " · parceria" : ""}{totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}</div>
                 </div>
                 {quit ? (
                   <span className="text-xs rounded-full px-2.5 py-1 shrink-0 flex items-center gap-1" style={{ background: C.goodBg, color: C.goodFg }}><Check size={11} /> quitado</span>
@@ -1073,6 +1076,7 @@ function BillingView({ items }) {
         <StatCard label="Faturado" value={brl(stats.faturado)} tone="ink" />
         <StatCard label="Recebido" value={brl(stats.recebido)} tone="good" />
         <StatCard label="A receber" value={brl(stats.aReceber)} tone="coral" />
+        {stats.parcerias > 0 && <StatCard label="Parcerias" value={brl(stats.parcerias)} tone="teal" />}
         <StatCard label="Atendimentos" value={String(stats.atend)} tone="teal" />
       </div>
 
@@ -1476,7 +1480,7 @@ function PatientHistory({ name, items, onClose, onAgendar, onOpenConsulta }) {
                 {valorDe(it) > 0 && (
                   <div className="text-xs mt-1" style={{ color: C.muted }}>
                     {brl(it.valor)}
-                    {totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}
+                    {it.parceria ? " · parceria" : ""}{totalPagoDe(it) > 0 ? ` · pago ${brl(totalPagoDe(it))}` : ""}{pagResumo(it) ? ` (${pagResumo(it)})` : ""}
                     {saldoC > 0 ? ` · resta ${brl(saldoC)}` : " · quitado"}
                   </div>
                 )}
@@ -1860,7 +1864,7 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
   const [f, setF] = useState(() => {
     const base = {
       patient: "", phone: "", instagram: "", date: "", time: "09:00", endTime: "10:00",
-      procedure: "", procedures: [], valor: "", precoModo: "vista", pagamentos: [], aviso: "", notes: "", status: "pendente", ...initial,
+      procedure: "", procedures: [], valor: "", precoModo: "vista", pagamentos: [], parceria: false, aviso: "", notes: "", status: "pendente", ...initial,
     };
     if ((!base.pagamentos || !base.pagamentos.length) && toNum(base.sinal) > 0) {
       base.pagamentos = [{ valor: base.sinal, forma: base.formaPgto || "", conta: base.sinalPara || "", parcelas: base.parcelas || "" }];
@@ -2050,6 +2054,18 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
             <input inputMode="decimal" value={f.valor} onChange={(e) => set("valor", e.target.value)} placeholder="0,00" style={inputStyle} />
           </Field>
 
+          <label className="flex items-start gap-2.5 cursor-pointer rounded-xl p-2.5"
+                 style={{ background: f.parceria ? C.tealSoft : C.bg, border: `1px solid ${f.parceria ? C.teal + "44" : C.line}` }}>
+            <input type="checkbox" checked={!!f.parceria} onChange={(e) => set("parceria", e.target.checked)}
+                   className="mt-0.5" style={{ accentColor: C.teal, width: 16, height: 16 }} />
+            <span>
+              <span className="text-sm block" style={{ color: C.ink }}>Parceria — a paciente não paga</span>
+              <span className="text-xs" style={{ color: C.muted }}>
+                Entra no faturado pelo valor do procedimento, mas não vira cobrança nem dívida.
+              </span>
+            </span>
+          </label>
+
           <div>
             <div className="text-xs font-medium mb-1" style={{ color: C.muted }}>Pagamentos <span style={{ color: C.faint }}>(pode dividir)</span></div>
             {(f.pagamentos || []).map((p, idx) => (
@@ -2082,7 +2098,16 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
             </button>
           </div>
 
-          {toNum(f.valor) > 0 && (
+          {toNum(f.valor) > 0 && f.parceria && (
+            <div className="rounded-xl p-3.5" style={{ background: C.tealSoft, border: `1px solid ${C.teal}33` }}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold" style={{ color: C.teal }}>Parceria · sem cobrança</span>
+                <span className="ff-d" style={{ fontSize: 22, fontWeight: 700, color: C.teal }}>{brl(f.valor)}</span>
+              </div>
+            </div>
+          )}
+
+          {toNum(f.valor) > 0 && !f.parceria && (
             <div className="rounded-xl p-3.5" style={{ background: saldo <= 0 ? C.goodBg : C.coralSoft, border: `1px solid ${(saldo <= 0 ? C.goodFg : C.coral) + "33"}` }}>
               <div className="flex justify-between text-xs mb-2" style={{ color: C.muted }}>
                 <span>Total {brl(f.valor)}</span>
