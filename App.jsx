@@ -3,7 +3,7 @@ import {
   Calendar, Plus, Phone, Trash2, Pencil, ChevronLeft, ChevronRight,
   Search, X, Check, CalendarDays, User, Instagram, AlertCircle,
   Users, Wallet, TrendingUp, List, Clock, RotateCcw, PhoneCall, MessageCircle, Package, Minus, Eye, EyeOff, LogOut,
-  FileSpreadsheet, ClipboardList,
+  FileSpreadsheet, ClipboardList, GraduationCap,
 } from "lucide-react";
 import { auth as fbAuth } from "./firebase";
 import { store } from "./store";
@@ -14,6 +14,7 @@ const FaturamentoChart = React.lazy(() => import("./Chart"));
 // Idem: a biblioteca de Excel so desce ao abrir a aba Exportar.
 const ExportView = React.lazy(() => import("./Export"));
 const ProcedimentosView = React.lazy(() => import("./Procedimentos"));
+const AlunasView = React.lazy(() => import("./Alunas"));
 
 // ---- Tema ------------------------------------------------------------------
 const C = {
@@ -249,6 +250,10 @@ const PEOPLE_KEY = "agenda:pacientes:v1";
 const STOCK_KEY = "agenda:estoque:v1";
 const PROCS_KEY = "agenda:procedimentos:v1";
 const CHAMADAS_KEY = "agenda:chamadas:v1";
+const ALUNAS_KEY = "agenda:alunas:v1";
+const CURSO_KEY = "agenda:curso:v1";
+// Valores padrao do curso; ficam editaveis na propria aba.
+const CURSO_PADRAO = { matricula: 350, parcelado: 3950, avista: 3650, maxParcelas: 6 };
 
 // ---- App -------------------------------------------------------------------
 export default function App() {
@@ -273,6 +278,8 @@ export default function App() {
   const [procs, setProcs] = useState(PROCS_PADRAO);
   // { "nome|categoria": { em: "AAAA-MM-DD", ref: data da consulta que gerou o prazo } }
   const [chamadas, setChamadas] = useState({});
+  const [alunas, setAlunas] = useState([]);
+  const [curso, setCurso] = useState(CURSO_PADRAO);
   const [auth, setAuth] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -306,8 +313,9 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e, pr, ch] = await Promise.all([
+      const [c, n, p, e, pr, ch, al, cu] = await Promise.all([
         ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY), ler(CHAMADAS_KEY),
+        ler(ALUNAS_KEY), ler(CURSO_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
@@ -316,6 +324,8 @@ export default function App() {
       const ve = parse(e); if (ve) setEstoque(ve);
       const vpr = parse(pr); if (vpr && vpr.length) setProcs(vpr);
       const vch = parse(ch); if (vch) setChamadas(vch);
+      const val = parse(al); if (val) setAlunas(val);
+      const vcu = parse(cu); if (vcu) setCurso({ ...CURSO_PADRAO, ...vcu });
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -363,6 +373,8 @@ export default function App() {
     try { await store.set(STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
     flash(`${ids.length} ${ids.length === 1 ? "consulta corrigida" : "consultas corrigidas"}.`);
   };
+  const persistAlunas = async (next) => { setAlunas(next); try { await store.set(ALUNAS_KEY, JSON.stringify(next)); } catch (_) {} };
+  const persistCurso = async (next) => { setCurso(next); try { await store.set(CURSO_KEY, JSON.stringify(next)); } catch (_) {} };
   const persistChamadas = async (next) => { setChamadas(next); try { await store.set(CHAMADAS_KEY, JSON.stringify(next)); } catch (_) {} };
   // "ref" guarda a consulta que gerou o prazo: se a pessoa fizer procedimento
   // novo, a marca antiga deixa de valer e ela volta para a fila sozinha.
@@ -435,6 +447,7 @@ export default function App() {
     { id: "pagamentos", label: "Pagamentos", icon: Wallet },
     { id: "faturamento", label: "Faturamento", icon: TrendingUp },
     { id: "estoque", label: "Estoque", icon: Package },
+    { id: "alunas", label: "Alunas", icon: GraduationCap },
     { id: "procedimentos", label: "Procedimentos", icon: ClipboardList },
     { id: "exportar", label: "Exportar", icon: FileSpreadsheet },
   ];
@@ -635,6 +648,10 @@ export default function App() {
           <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
         ) : view === "estoque" ? (
           <EstoqueView estoque={estoque} onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
+        ) : view === "alunas" ? (
+          <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
+            <AlunasView alunas={alunas} curso={curso} onSaveAlunas={persistAlunas} onSaveCurso={persistCurso} C={C} />
+          </Suspense>
         ) : view === "procedimentos" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
             <ProcedimentosView items={items} procs={procs} onSaveProcs={persistProcs}
