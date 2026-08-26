@@ -86,6 +86,7 @@ const brl = (v) => toNum(v).toLocaleString("pt-BR", { style: "currency", currenc
 const igHandle = (s) => (s || "").replace(/^@+/, "");
 // "Leticia  BEZERRA" e "Letícia Bezerra" devem bater como a mesma pessoa
 const normNome = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+const procsArr = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean);
 const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" + ");
 const procsText = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean).join(" ");
 const initials = (name) => (name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase() || "?";
@@ -159,11 +160,28 @@ function last6Months(items, ym) {
   }
   return out;
 }
-function topProcs(items, ym) {
+// Conta por procedimento individual: uma consulta com dois procedimentos soma 1
+// em cada. O valor e repartido pelo preco de tabela de cada um (sem catalogo,
+// divide igual), entao a soma das linhas continua batendo com o faturado.
+function topProcs(items, ym, catalogo) {
+  const precoDe = (nome) => {
+    const p = (catalogo || []).find((x) => x.nome === nome);
+    return p ? toNum(p.vista) : 0;
+  };
   const map = {};
-  items.filter((it) => ymOf(it.date) === ym && it.status !== "cancelado" && valorDe(it) > 0)
-    .forEach((it) => { const p = procsLabel(it) || "Sem procedimento"; map[p] = (map[p] || 0) + valorDe(it); });
-  return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  items.filter((it) => ymOf(it.date) === ym && it.status !== "cancelado").forEach((it) => {
+    const nomes = procsArr(it);
+    if (!nomes.length) return;
+    const total = valorDe(it);
+    const pesos = nomes.map(precoDe);
+    const soma = pesos.reduce((a, b) => a + b, 0);
+    nomes.forEach((nome, i) => {
+      if (!map[nome]) map[nome] = { qtd: 0, valor: 0 };
+      map[nome].qtd += 1;
+      map[nome].valor += soma > 0 ? total * (pesos[i] / soma) : total / nomes.length;
+    });
+  });
+  return Object.entries(map).sort((a, b) => (b[1].qtd - a[1].qtd) || (b[1].valor - a[1].valor));
 }
 
 const LOGO = "data:image/jpeg;base64,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";
@@ -662,7 +680,7 @@ export default function App() {
             <ExportView items={items} estoque={estoque} C={C} />
           </Suspense>
         ) : (
-          <BillingView items={items} />
+          <BillingView items={items} procs={procs} />
         )}
       </main>
 
@@ -1057,13 +1075,13 @@ function PaymentsView({ items, query, onEdit, onCorrigirStatus }) {
 }
 
 // ---- Faturamento -----------------------------------------------------------
-function BillingView({ items }) {
+function BillingView({ items, procs: catalogo }) {
   const now = new Date();
   const [ym, setYm] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`);
   const shift = (dir) => { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 1 + dir, 1); setYm(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); };
   const stats = useMemo(() => billingForMonth(items, ym), [items, ym]);
   const chart = useMemo(() => last6Months(items, ym), [items, ym]);
-  const procs = useMemo(() => topProcs(items, ym), [items, ym]);
+  const procs = useMemo(() => topProcs(items, ym, catalogo), [items, ym, catalogo]);
   const porConta = useMemo(() => {
     const list = items.filter((it) => ymOf(it.date) === ym && it.status !== "cancelado");
     const map = {};
@@ -1134,15 +1152,25 @@ function BillingView({ items }) {
 
       {procs.length > 0 && (
         <div className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
-          <div className="text-sm font-medium mb-3" style={{ color: C.ink }}>Procedimentos do mês</div>
-          <div className="space-y-2.5">
-            {procs.map(([name, val]) => {
-              const pct = stats.faturado ? Math.round((val / stats.faturado) * 100) : 0;
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="text-sm font-medium" style={{ color: C.ink }}>Procedimentos do mês</div>
+            <div className="text-xs" style={{ color: C.muted }}>
+              {procs.reduce((s, [, v]) => s + v.qtd, 0)} no total
+            </div>
+          </div>
+          <div className="space-y-3">
+            {procs.map(([name, v]) => {
+              const maior = Math.max(...procs.map(([, x]) => x.qtd), 1);
+              const pct = Math.round((v.qtd / maior) * 100);
               return (
                 <div key={name}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span style={{ color: C.ink }}>{name}</span>
-                    <span style={{ color: C.muted }}>{brl(val)}</span>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="ff-d shrink-0 rounded-lg px-2 py-0.5 text-sm"
+                          style={{ background: C.coralSoft, color: C.coral, fontWeight: 700, minWidth: 34, textAlign: "center" }}>
+                      {v.qtd}
+                    </span>
+                    <span className="text-xs flex-1 min-w-0" style={{ color: C.ink }}>{name}</span>
+                    <span className="text-xs shrink-0" style={{ color: C.muted }}>{brl(v.valor)}</span>
                   </div>
                   <div className="rounded-full" style={{ height: 6, background: C.bg }}>
                     <div className="rounded-full" style={{ height: 6, width: `${pct}%`, background: C.coral }} />
