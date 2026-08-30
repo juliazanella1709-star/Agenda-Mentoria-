@@ -18,6 +18,7 @@ const dataBR = (k) => { const [y, m, d] = String(k).split("-"); return d ? `${d}
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 const FORMAS = ["Pix", "Dinheiro", "Crédito", "Débito", "Transferência"];
+const CONTAS = ["Loan", "Mari"];
 
 // Cada aluna pode ter valores proprios; vazio significa "usa o padrao do curso".
 const usa = (v, padrao) => (v === "" || v === null || v === undefined ? toNum(padrao) : toNum(v));
@@ -252,7 +253,8 @@ function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
   const salvarPag = () => {
     const valor = toNum(pagForm.valor);
     if (valor <= 0) return;
-    const reg = { id: pagForm.id || uid(), data: pagForm.data || hojeKey(), valor, forma: pagForm.forma || "", obs: pagForm.obs || "" };
+    const reg = { id: pagForm.id || uid(), data: pagForm.data || hojeKey(), valor,
+                  forma: pagForm.forma || "", conta: pagForm.conta || "", obs: pagForm.obs || "" };
     const lista = pagForm.id
       ? (aluna.pagamentos || []).map((p) => (p.id === pagForm.id ? reg : p))
       : [...(aluna.pagamentos || []), reg];
@@ -308,7 +310,7 @@ function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
         </div>
       </div>
 
-      <button onClick={() => setPagForm({ valor: "", data: hojeKey(), forma: "Pix", obs: "" })}
+      <button onClick={() => setPagForm({ valor: "", data: hojeKey(), forma: "Pix", conta: "", obs: "" })}
               className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
               style={{ background: C.ink, color: "#fff" }}>
         <Plus size={17} /> Lançar pagamento do curso
@@ -323,7 +325,7 @@ function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
             <div className="flex-1 min-w-0">
               <div className="text-sm" style={{ color: C.ink }}>{brl(p.valor)}</div>
               <div className="text-xs" style={{ color: C.muted }}>
-                {dataBR(p.data)}{p.forma ? ` · ${p.forma}` : ""}{p.obs ? ` · ${p.obs}` : ""}
+                {dataBR(p.data)}{p.forma ? ` · ${p.forma}` : ""}{p.conta ? ` · ${p.conta}` : ""}{p.obs ? ` · ${p.obs}` : ""}
               </div>
             </div>
             <button onClick={() => setPagForm({ ...p })} className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
@@ -355,6 +357,16 @@ function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
               <button key={x} onClick={() => setPagForm({ ...pagForm, forma: x })} className="text-xs rounded-lg px-3 py-1.5 font-medium"
                       style={{ background: pagForm.forma === x ? C.ink : C.surface, color: pagForm.forma === x ? "#fff" : C.muted,
                                border: `1px solid ${pagForm.forma === x ? C.ink : C.line}` }}>{x}</button>
+            ))}
+          </div>
+
+          <div className="text-xs mb-1.5 mt-3" style={{ color: C.muted }}>Conta que recebeu</div>
+          <div className="flex gap-1.5">
+            {CONTAS.map((x) => (
+              <button key={x} onClick={() => setPagForm({ ...pagForm, conta: pagForm.conta === x ? "" : x })}
+                      className="flex-1 text-xs rounded-lg py-2 font-medium"
+                      style={{ background: pagForm.conta === x ? C.ink : C.surface, color: pagForm.conta === x ? "#fff" : C.muted,
+                               border: `1px solid ${pagForm.conta === x ? C.ink : C.line}` }}>{x}</button>
             ))}
           </div>
 

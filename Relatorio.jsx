@@ -82,13 +82,29 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       const k = p.forma || "Sem forma";
       porForma[k] = (porForma[k] || 0) + v;
     }
-    const porConta = {};
+    // Por conta (Loan / Mari), detalhando as formas. Entram tanto os pagamentos
+    // das consultas quanto os das alunas; sem conta preenchida cai em "Sem conta".
+    const contas = {};
+    const somaConta = (conta, forma, v) => {
+      const k = conta || "Sem conta";
+      if (!contas[k]) contas[k] = { total: 0, formas: {} };
+      contas[k].total += v;
+      const f = forma || "Sem forma";
+      contas[k].formas[f] = (contas[k].formas[f] || 0) + v;
+    };
     for (const it of consultas) {
       for (const p of pagList(it)) {
-        const v = toNum(p.valor); if (v <= 0 || !p.conta) continue;
-        porConta[p.conta] = (porConta[p.conta] || 0) + v;
+        const v = toNum(p.valor); if (v <= 0) continue;
+        somaConta(p.conta, p.forma, v);
       }
     }
+    for (const p of pagAlunas) {
+      const v = toNum(p.valor); if (v <= 0) continue;
+      somaConta(p.conta, p.forma, v);
+    }
+    const porConta = Object.entries(contas)
+      .map(([nome, d]) => ({ nome, total: d.total, formas: Object.entries(d.formas).sort((a, b) => b[1] - a[1]) }))
+      .sort((a, b) => b.total - a.total);
     return {
       recConsultas, recAlunas, total: recConsultas + recAlunas,
       parcerias: consultas.filter((it) => it.parceria).reduce((s, it) => s + valorDe(it), 0),
@@ -97,7 +113,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       previsto: consultas.reduce((s, it) => s + valorDe(it), 0),
       aReceber: consultas.reduce((s, it) => s + saldoDe(it), 0),
       porForma: Object.entries(porForma).sort((a, b) => b[1] - a[1]),
-      porConta: Object.entries(porConta).sort((a, b) => b[1] - a[1]),
+      porConta,
     };
   }, [consultas, pagAlunas]);
 
@@ -176,7 +192,11 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
 
       <h2>Como foi pago</h2>
       ${tabela(["Forma", "Valor"], totais.porForma.map(([f, v]) => [f, brl(v)]), [1])}
-      ${totais.porConta.length ? `<h2>Por conta (atendimentos)</h2>${tabela(["Conta", "Valor"], totais.porConta.map(([c, v]) => [c, brl(v)]), [1])}` : ""}
+      ${totais.porConta.length ? `<h2>Entrou em cada conta</h2>${tabela(["Conta", "Forma", "Valor"],
+        totais.porConta.flatMap((c) => [
+          [{ html: `<b>${esc(c.nome)}</b>` }, "", { html: `<b>${esc(brl(c.total))}</b>` }],
+          ...c.formas.map(([f, v]) => ["", f, brl(v)]),
+        ]), [2])}` : ""}
 
       <h2>Atendimentos (${consultas.length})</h2>
       ${tabela(["Data", "Hora", "Paciente", "Procedimentos", "Valor", "Pago", "Forma", "Falta"], linhasAtend, [4, 5, 7])}
@@ -285,17 +305,26 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
               <span className="text-sm font-semibold" style={{ color: C.ink }}>{brl(v)}</span>
             </div>
           ))}
-          {totais.porConta.length > 0 && (
-            <div className="px-4 py-2.5" style={{ borderTop: `1px solid ${C.line}`, background: C.bg }}>
-              <div className="text-xs mb-1" style={{ color: C.muted }}>Por conta (atendimentos)</div>
-              {totais.porConta.map(([conta, v]) => (
-                <div key={conta} className="flex justify-between text-xs py-0.5">
-                  <span style={{ color: C.muted }}>{conta}</span>
-                  <span style={{ color: C.ink, fontWeight: 600 }}>{brl(v)}</span>
+
+        </Secao>
+      )}
+
+      {totais.porConta.length > 0 && (
+        <Secao titulo="Entrou em cada conta" extra={brl(totais.total)}>
+          {totais.porConta.map((c) => (
+            <div key={c.nome} style={{ borderTop: `1px solid ${C.line}` }}>
+              <div className="px-4 py-2.5 flex justify-between items-center" style={{ background: C.bg }}>
+                <span className="text-sm font-semibold" style={{ color: C.ink }}>{c.nome}</span>
+                <span className="text-sm font-semibold" style={{ color: C.ink }}>{brl(c.total)}</span>
+              </div>
+              {c.formas.map(([forma, v]) => (
+                <div key={forma} className="px-4 py-2 flex justify-between items-center">
+                  <span className="text-xs" style={{ color: C.muted, paddingLeft: 10 }}>{forma}</span>
+                  <span className="text-xs" style={{ color: C.ink }}>{brl(v)}</span>
                 </div>
               ))}
             </div>
-          )}
+          ))}
         </Secao>
       )}
 
