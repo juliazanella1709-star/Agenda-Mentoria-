@@ -309,6 +309,16 @@ export default function App() {
     document.head.appendChild(l);
     const s = document.createElement("style");
     s.textContent = `
+      .ag-print-only{display:none}
+      @media print{
+        @page{margin:14mm}
+        body{background:#fff !important}
+        .ag-noprint{display:none !important}
+        .ag-print-only{display:block !important}
+        main{padding:0 !important;max-width:100% !important}
+        /* evita cortar um bloco no meio da pagina */
+        .ag-bloco{break-inside:avoid;page-break-inside:avoid}
+      }
       .ff-d{font-family:'Bricolage Grotesque',system-ui,sans-serif}
       .ff-b{font-family:'Inter',system-ui,sans-serif}
       .ff-serif{font-family:'Cormorant Garamond',Georgia,serif}
@@ -483,7 +493,7 @@ export default function App() {
 
   return (
     <div className="ff-b min-h-screen w-full" style={{ background: C.bg, color: C.ink }}>
-      <header style={{ background: C.ink }}>
+      <header className="ag-noprint" style={{ background: C.ink }}>
         <div className="max-w-5xl mx-auto px-5 py-3 flex items-center gap-3">
           <div className="leading-none text-white shrink-0">
             <div className="ff-b" style={{ fontSize: 8, letterSpacing: 3, opacity: 0.6 }}>MENTORIA</div>
@@ -514,7 +524,7 @@ export default function App() {
       </header>
 
       {/* Menu de navegação */}
-      <div style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
+      <div className="ag-noprint" style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
         <div className="max-w-5xl mx-auto px-3 flex gap-1 overflow-x-auto ag-nav">
           {TABS.map((t) => {
             const on = view === t.id; const Icon = t.icon;

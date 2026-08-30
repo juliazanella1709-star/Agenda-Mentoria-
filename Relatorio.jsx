@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertCircle, Printer } from "lucide-react";
 
 // Aba "Relatório": fechamento de um dia - o que entrou, como foi pago, quais
 // atendimentos, os pagamentos das alunas e a posicao do estoque.
@@ -9,6 +9,8 @@ const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
 const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
 const DIAS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+const dataBR = (k) => { const [y, m, d] = String(k).split("-"); return d ? `${d}/${m}/${y}` : ""; };
+const curto = (k) => { const [, m, d] = String(k).split("-"); return d ? `${d}/${m}` : ""; };
 const porExtenso = (k) => { const d = parseKey(k); return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]}`; };
 
 const toNum = (s) => {
@@ -31,27 +33,37 @@ const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []
 
 export default function RelatorioView({ items, alunas, estoque, C }) {
   const [dia, setDia] = useState(keyOf(new Date()));
+  const [modo, setModo] = useState("dia");        // dia | periodo
+  const [de, setDe] = useState(keyOf(new Date()));
+  const [ate, setAte] = useState(keyOf(new Date()));
   const andar = (n) => { const d = parseKey(dia); d.setDate(d.getDate() + n); setDia(keyOf(d)); };
+
+  // janela vigente; no modo dia, de = ate = o dia escolhido
+  const ini = modo === "dia" ? dia : de;
+  const fim = modo === "dia" ? dia : ate;
+  const noPeriodo = (k) => k >= ini && k <= fim;
+  const varios = ini !== fim;
+  const titulo = varios ? `${dataBR(ini)} a ${dataBR(fim)}` : porExtenso(ini);
 
   // --- consultas do dia -----------------------------------------------------
   const consultas = useMemo(
     () => (items || [])
-      .filter((it) => it.date === dia && it.status !== "cancelado")
-      .sort((a, b) => (a.time || "").localeCompare(b.time || "")),
-    [items, dia]
+      .filter((it) => noPeriodo(it.date) && it.status !== "cancelado")
+      .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))),
+    [items, ini, fim]
   );
 
   // --- pagamentos de alunas com data no dia ---------------------------------
   const pagAlunas = useMemo(() => {
     const out = [];
     for (const a of alunas || []) {
-      for (const p of a.pagamentos || []) if (p.data === dia) out.push({ aluna: a.nome, ...p });
-      if (a.matriculaPaga && a.matriculaData === dia) {
+      for (const p of a.pagamentos || []) if (noPeriodo(p.data || "")) out.push({ aluna: a.nome, ...p });
+      if (a.matriculaPaga && noPeriodo(a.matriculaData || "")) {
         out.push({ aluna: a.nome, valor: null, forma: "", obs: "matrícula", ehMatricula: true });
       }
     }
     return out;
-  }, [alunas, dia]);
+  }, [alunas, ini, fim]);
 
   // --- totais ---------------------------------------------------------------
   const totais = useMemo(() => {
@@ -88,7 +100,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
 
   const card = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16 };
   const Secao = ({ titulo, extra, children }) => (
-    <div className="mb-4" style={{ ...card, overflow: "hidden" }}>
+    <div className="mb-4 ag-bloco" style={{ ...card, overflow: "hidden" }}>
       <div className="px-4 py-3 flex items-baseline justify-between" style={{ borderBottom: `1px solid ${C.line}` }}>
         <div className="text-sm font-medium" style={{ color: C.ink }}>{titulo}</div>
         {extra ? <div className="text-xs" style={{ color: C.muted }}>{extra}</div> : null}
@@ -99,23 +111,61 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
 
   return (
     <div className="ag-fade">
-      <div className="flex items-center justify-between mb-4">
-        <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Relatório</div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => andar(-1)} className="w-9 h-9 rounded-lg flex items-center justify-center"
-                  style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.muted }}><ChevronLeft size={17} /></button>
-          <button onClick={() => setDia(keyOf(new Date()))} className="text-xs rounded-lg px-3 py-2 font-medium"
-                  style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.muted }}>Hoje</button>
-          <button onClick={() => andar(1)} className="w-9 h-9 rounded-lg flex items-center justify-center"
-                  style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.muted }}><ChevronRight size={17} /></button>
+      <div className="ag-noprint">
+        <div className="flex items-center justify-between mb-3">
+          <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Relatório</div>
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
+                  style={{ background: C.ink, color: "#fff" }}>
+            <Printer size={15} /> Imprimir
+          </button>
         </div>
+
+        <div className="flex gap-2 mb-3">
+          {[["dia", "Um dia"], ["periodo", "Período"]].map(([k, l]) => (
+            <button key={k} onClick={() => setModo(k)} className="text-xs rounded-lg px-3 py-1.5 font-medium"
+                    style={{ background: modo === k ? C.ink : C.surface, color: modo === k ? "#fff" : C.muted,
+                             border: `1px solid ${modo === k ? C.ink : C.line}` }}>{l}</button>
+          ))}
+        </div>
+
+        {modo === "dia" ? (
+          <div className="flex items-center gap-1 mb-3">
+            <button onClick={() => andar(-1)} className="w-9 h-9 rounded-lg flex items-center justify-center"
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.muted }}><ChevronLeft size={17} /></button>
+            <input type="date" value={dia} onChange={(e) => setDia(e.target.value)}
+                   style={{ flex: 1, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 11px", fontSize: 14, color: C.ink }} />
+            <button onClick={() => andar(1)} className="w-9 h-9 rounded-lg flex items-center justify-center"
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.muted }}><ChevronRight size={17} /></button>
+            <button onClick={() => setDia(keyOf(new Date()))} className="text-xs rounded-lg px-3 py-2 font-medium shrink-0"
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.muted }}>Hoje</button>
+          </div>
+        ) : (
+          <div className="flex gap-2 mb-3">
+            <label className="flex-1">
+              <div className="text-xs mb-1" style={{ color: C.muted }}>De</div>
+              <input type="date" value={de} onChange={(e) => setDe(e.target.value)}
+                     style={{ width: "100%", background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 11px", fontSize: 14, color: C.ink }} />
+            </label>
+            <label className="flex-1">
+              <div className="text-xs mb-1" style={{ color: C.muted }}>Até</div>
+              <input type="date" value={ate} onChange={(e) => setAte(e.target.value)}
+                     style={{ width: "100%", background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 11px", fontSize: 14, color: C.ink }} />
+            </label>
+          </div>
+        )}
       </div>
 
-      <div className="text-sm capitalize mb-3" style={{ color: C.muted }}>{porExtenso(dia)}</div>
+      {/* cabecalho que aparece so no papel */}
+      <div className="ag-print-only" style={{ marginBottom: 14 }}>
+        <div className="ff-d" style={{ fontSize: 18, fontWeight: 700 }}>Mentoria HOF — Relatório</div>
+        <div style={{ fontSize: 12, color: "#555" }}>{titulo}</div>
+      </div>
+
+      <div className="text-sm capitalize mb-3 ag-noprint" style={{ color: C.muted }}>{titulo}</div>
 
       {/* ---- o que entrou ---- */}
-      <div className="p-4 mb-4" style={{ ...card, background: C.ink }}>
-        <div className="text-xs mb-1" style={{ color: "#ffffff99" }}>Entrou no dia</div>
+      <div className="p-4 mb-4 ag-bloco" style={{ ...card, background: C.ink, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
+        <div className="text-xs mb-1" style={{ color: "#ffffff99" }}>{varios ? "Entrou no período" : "Entrou no dia"}</div>
         <div className="ff-d" style={{ fontSize: 32, fontWeight: 700, color: "#fff" }}>{brl(totais.total)}</div>
         <div className="text-xs mt-2" style={{ color: "#ffffff99" }}>
           Atendimentos {brl(totais.recConsultas)} · Alunas {brl(totais.recAlunas)}
@@ -147,7 +197,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       {/* ---- atendimentos ---- */}
       <Secao titulo="Atendimentos" extra={`${consultas.length} · previsto ${brl(totais.previsto)}`}>
         {consultas.length === 0 && (
-          <div className="text-center py-8 text-sm" style={{ color: C.muted }}>Nenhum atendimento neste dia.</div>
+          <div className="text-center py-8 text-sm" style={{ color: C.muted }}>Nenhum atendimento no período.</div>
         )}
         {consultas.map((it) => {
           const pago = totalPagoDe(it), saldo = saldoDe(it);
@@ -158,7 +208,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate" style={{ color: C.ink }}>
-                    {it.time ? `${it.time} · ` : ""}{it.patient}
+                    {varios ? `${curto(it.date)} · ` : ""}{it.time ? `${it.time} · ` : ""}{it.patient}
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: C.muted }}>{procsLabel(it) || "—"}</div>
                 </div>
@@ -184,7 +234,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
         })}
         {totais.aReceber > 0 && (
           <div className="px-4 py-2.5 flex justify-between text-xs" style={{ borderTop: `1px solid ${C.line}`, background: C.coralSoft }}>
-            <span style={{ color: C.coral }}>A receber deste dia</span>
+            <span style={{ color: C.coral }}>A receber</span>
             <span style={{ color: C.coral, fontWeight: 700 }}>{brl(totais.aReceber)}</span>
           </div>
         )}
@@ -193,14 +243,14 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       {/* ---- alunas ---- */}
       <Secao titulo="Pagamentos de alunas" extra={pagAlunas.length ? brl(totais.recAlunas) : ""}>
         {pagAlunas.length === 0 && (
-          <div className="text-center py-8 text-sm" style={{ color: C.muted }}>Nenhum pagamento de aluna neste dia.</div>
+          <div className="text-center py-8 text-sm" style={{ color: C.muted }}>Nenhum pagamento de aluna no período.</div>
         )}
         {pagAlunas.map((p, i) => (
           <div key={i} className="px-4 py-3 flex items-start justify-between gap-3" style={{ borderTop: `1px solid ${C.line}` }}>
             <div className="flex-1 min-w-0">
               <div className="text-sm truncate" style={{ color: C.ink }}>{p.aluna}</div>
               <div className="text-xs mt-0.5" style={{ color: C.muted }}>
-                {p.ehMatricula ? "matrícula marcada como paga" : `${p.forma || "sem forma"}${p.obs ? ` · ${p.obs}` : ""}`}
+                {varios && p.data ? `${curto(p.data)} · ` : ""}{p.ehMatricula ? "matrícula marcada como paga" : `${p.forma || "sem forma"}${p.obs ? ` · ${p.obs}` : ""}`}
               </div>
             </div>
             <div className="text-sm font-semibold shrink-0" style={{ color: p.ehMatricula ? C.muted : C.ink }}>
@@ -239,7 +289,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
         })}
       </Secao>
 
-      <div className="text-xs leading-relaxed p-3 rounded-xl flex gap-2" style={{ color: C.muted, background: C.tealSoft }}>
+      <div className="text-xs leading-relaxed p-3 rounded-xl flex gap-2 ag-noprint" style={{ color: C.muted, background: C.tealSoft }}>
         <AlertCircle size={14} className="shrink-0 mt-0.5" />
         <span>
           Os pagamentos das consultas não guardam data própria, então entram no dia da consulta.
