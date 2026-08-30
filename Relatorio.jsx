@@ -35,6 +35,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
   const [dia, setDia] = useState(keyOf(new Date()));
   const [modo, setModo] = useState("dia");        // dia | periodo
   const [erroArquivo, setErroArquivo] = useState("");
+  const [gerando, setGerando] = useState(false);
   const [de, setDe] = useState(keyOf(new Date()));
   const [ate, setAte] = useState(keyOf(new Date()));
   const andar = (n) => { const d = parseKey(dia); d.setDate(d.getDate() + n); setDia(keyOf(d)); };
@@ -119,123 +120,137 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
   }, [consultas, pagAlunas]);
 
 
-  // Monta o relatorio como documento do Word. Usa HTML com o cabecalho que o
-  // Word reconhece: abre formatado e permite editar, sem biblioteca extra.
+  // Gera um .docx de verdade (Office Open XML). O formato antigo era HTML com
+  // extensao .doc: o Word abria, mas Pages e iPhone nao. A biblioteca entra por
+  // import dinamico, entao so e baixada quando alguem exporta.
+  const VERMELHO = "C0392B";
   const baixarWord = async () => {
-    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const vermelho = (txt) => ({ html: `<b style="color:#C0392B">${esc(txt)}</b>` });
-    const tabela = (cabs, linhas, alinhaDir = []) => {
-      if (!linhas.length) return "<p style='color:#777'>Nada no período.</p>";
-      const th = cabs.map((c, i) => `<th style="text-align:${alinhaDir.includes(i) ? "right" : "left"}">${esc(c)}</th>`).join("");
-      const tr = linhas.map((l) =>
-        `<tr>${l.map((c, i) => {
-          const conteudo = c && typeof c === "object" && c.html !== undefined ? c.html : esc(c);
-          return `<td style="text-align:${alinhaDir.includes(i) ? "right" : "left"}">${conteudo}</td>`;
-        }).join("")}</tr>`
-      ).join("");
-      return `<table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
-    };
-
-    const celValor = (it) => {
-      if (it.parceria) {
-        return { html: `<s style="color:#888">${esc(brl(valorDe(it)))}</s><br>` +
-                       `<b style="color:#C0392B">PARCERIA</b>` };
-      }
-      if (descontoDe(it) > 0) {
-        return { html: `<s style="color:#888">${esc(brl(it.valor))}</s><br>` +
-                       `<b>${esc(brl(valorDe(it)))}</b><br>` +
-                       `<span style="color:#C0392B">desconto ${esc(brl(descontoDe(it)))}</span>` };
-      }
-      return brl(valorDe(it));
-    };
-    const linhasAtend = consultas.map((it) => [
-      curto(it.date), it.time || "", it.patient || "", procsLabel(it) || "—",
-      celValor(it),
-      it.parceria ? { html: '<b style="color:#C0392B">sem cobrança</b>' } : brl(totalPagoDe(it)),
-      pagList(it).filter((x) => toNum(x.valor) > 0).map((x) => `${x.forma || "?"}${x.conta ? " " + x.conta : ""}`).join(" + "),
-      saldoDe(it) > 0 ? brl(saldoDe(it)) : "",
-    ]);
-    const linhasAlunas = pagAlunas.map((p) => [
-      curto(p.data || ""), p.aluna, p.ehMatricula ? "matrícula marcada como paga" : (p.forma || ""),
-      p.obs || "", p.ehMatricula ? "—" : brl(p.valor),
-    ]);
-    const linhasProd = (estoque || []).map((p) => {
-      const ini = toNum(p.inicial), atual = toNum(p.qtd);
-      return [p.nome, ini, Math.max(ini - atual, 0), atual, toNum(p.min)];
-    });
-
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
-      xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="utf-8"><title>Relatório</title>
-      <style>
-        body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222}
-        h1{font-size:16pt;margin:0 0 2pt}
-        h2{font-size:12pt;margin:16pt 0 4pt;border-bottom:1px solid #ccc;padding-bottom:2pt}
-        .sub{color:#666;font-size:10pt;margin:0 0 12pt}
-        table{border-collapse:collapse;width:100%;margin:4pt 0}
-        th,td{border:1px solid #d5d5d5;padding:4pt 6pt;font-size:10pt}
-        th{background:#f2f0ee}
-        .tot{font-size:14pt;font-weight:bold}
-      </style></head><body>
-      <h1>Mentoria HOF — Relatório</h1>
-      <p class="sub">${esc(titulo)}</p>
-
-      <h2>Resumo</h2>
-      ${tabela(["Item", "Valor"], [
-        ["Entrou no período", brl(totais.total)],
-        ["  Atendimentos", brl(totais.recConsultas)],
-        ["  Alunas", brl(totais.recAlunas)],
-        ["Previsto (valor dos atendimentos)", brl(totais.previsto)],
-        ["A receber", brl(totais.aReceber)],
-        [vermelho("Parcerias (sem cobrança)"), vermelho(brl(totais.parcerias))],
-        [vermelho("Descontos concedidos"), vermelho(brl(totais.descontos))],
-      ], [1])}
-
-      <h2>Como foi pago</h2>
-      ${tabela(["Forma", "Valor"], totais.porForma.map(([f, v]) => [f, brl(v)]), [1])}
-      ${totais.porConta.length ? `<h2>Entrou em cada conta</h2>${tabela(["Conta", "Forma", "Valor"],
-        totais.porConta.flatMap((c) => [
-          [{ html: `<b>${esc(c.nome)}</b>` }, "", { html: `<b>${esc(brl(c.total))}</b>` }],
-          ...c.formas.map(([f, v]) => ["", f, brl(v)]),
-        ]), [2])}` : ""}
-
-      <h2>Atendimentos (${consultas.length})</h2>
-      ${tabela(["Data", "Hora", "Paciente", "Procedimentos", "Valor", "Pago", "Forma", "Falta"], linhasAtend, [4, 5, 7])}
-
-      <h2>Pagamentos de alunas</h2>
-      ${tabela(["Data", "Aluna", "Forma", "Observação", "Valor"], linhasAlunas, [4])}
-
-      <h2>Produtos</h2>
-      ${tabela(["Produto", "Início", "Usado", "Sobrou", "Mínimo"], linhasProd, [1, 2, 3, 4])}
-      </body></html>`;
-
-    const nome = `relatorio-mentoria-hof-${ini}${varios ? "_a_" + fim : ""}.doc`;
-    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
-
-    // No iPhone o download por link e ignorado pelo Safari. Quando existe o menu
-    // de compartilhar do sistema, usa ele: da para salvar nos Arquivos ou enviar
-    // direto pelo WhatsApp. Nos outros aparelhos, baixa normal.
+    setErroArquivo("");
+    setGerando(true);
     try {
-      const file = new File([blob], nome, { type: "application/msword" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "Relatório Mentoria HOF" });
-        return;
-      }
-    } catch (e) {
-      if (e && e.name === "AbortError") return;   // a pessoa fechou o menu
-      // qualquer outro problema: segue para o download normal
-    }
+      const D = await import("docx");
+      const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+              HeadingLevel, WidthType, AlignmentType, BorderStyle } = D;
 
-    try {
+      const txt = (t, o = {}) => new TextRun({ text: String(t == null ? "" : t), ...o });
+      const cel = (filhos, dir = false) => new TableCell({
+        children: [new Paragraph({ children: Array.isArray(filhos) ? filhos : [filhos],
+                                   alignment: dir ? AlignmentType.RIGHT : AlignmentType.LEFT })],
+        margins: { top: 60, bottom: 60, left: 100, right: 100 },
+      });
+      const tabela = (cabs, linhas, dirs = []) => new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            tableHeader: true,
+            children: cabs.map((c, i) => cel(txt(c, { bold: true, size: 19 }), dirs.includes(i))),
+          }),
+          ...(linhas.length ? linhas : [[ "—" ]]).map((l) => new TableRow({
+            children: (Array.isArray(l) ? l : [l]).map((c, i) =>
+              cel(Array.isArray(c) ? c : txt(c, { size: 19 }), dirs.includes(i))),
+          })),
+        ],
+      });
+      const titulo2 = (t) => new Paragraph({ text: t, heading: HeadingLevel.HEADING_2, spacing: { before: 280, after: 100 } });
+      const vazio = () => new Paragraph({ text: "" });
+
+      // celula do valor: parceria riscada e desconto destacado, como na tela
+      const celValor = (it) => {
+        if (it.parceria) return [
+          txt(brl(valorDe(it)), { strike: true, color: "888888", size: 19 }),
+          txt("  PARCERIA", { bold: true, color: VERMELHO, size: 19 }),
+        ];
+        if (descontoDe(it) > 0) return [
+          txt(brl(it.valor), { strike: true, color: "888888", size: 19 }),
+          txt("  " + brl(valorDe(it)), { bold: true, size: 19 }),
+          txt("  (desc. " + brl(descontoDe(it)) + ")", { color: VERMELHO, size: 19 }),
+        ];
+        return txt(brl(valorDe(it)), { size: 19 });
+      };
+
+      const doc = new Document({
+        sections: [{
+          children: [
+            new Paragraph({ children: [txt("Mentoria HOF — Relatório", { bold: true, size: 32 })] }),
+            new Paragraph({ children: [txt(titulo, { color: "666666", size: 20 })], spacing: { after: 200 } }),
+
+            titulo2("Resumo"),
+            tabela(["Item", "Valor"], [
+              ["Entrou no período", brl(totais.total)],
+              ["   Atendimentos", brl(totais.recConsultas)],
+              ["   Alunas", brl(totais.recAlunas)],
+              ["Previsto (valor dos atendimentos)", brl(totais.previsto)],
+              ["A receber", brl(totais.aReceber)],
+              [[txt("Parcerias (sem cobrança)", { bold: true, color: VERMELHO, size: 19 })],
+               [txt(brl(totais.parcerias), { bold: true, color: VERMELHO, size: 19 })]],
+              [[txt("Descontos concedidos", { bold: true, color: VERMELHO, size: 19 })],
+               [txt(brl(totais.descontos), { bold: true, color: VERMELHO, size: 19 })]],
+            ], [1]),
+
+            titulo2("Como foi pago"),
+            tabela(["Forma", "Valor"], totais.porForma.map(([f, v]) => [f, brl(v)]), [1]),
+
+            titulo2("Entrou em cada conta"),
+            tabela(["Conta", "Forma", "Valor"], totais.porConta.flatMap((c) => [
+              [[txt(c.nome, { bold: true, size: 19 })], "", [txt(brl(c.total), { bold: true, size: 19 })]],
+              ...c.formas.map(([f, v]) => ["", f, brl(v)]),
+            ]), [2]),
+
+            titulo2(`Atendimentos (${consultas.length})`),
+            tabela(["Data", "Hora", "Paciente", "Procedimentos", "Valor", "Pago", "Forma", "Falta"],
+              consultas.map((it) => [
+                curto(it.date), it.time || "", it.patient || "", procsLabel(it) || "—",
+                celValor(it),
+                it.parceria ? [txt("sem cobrança", { bold: true, color: VERMELHO, size: 19 })] : brl(totalPagoDe(it)),
+                pagList(it).filter((x) => toNum(x.valor) > 0)
+                  .map((x) => `${x.forma || "?"}${x.conta ? " " + x.conta : ""}`).join(" + "),
+                saldoDe(it) > 0 ? brl(saldoDe(it)) : "",
+              ]), [4, 5, 7]),
+
+            titulo2("Pagamentos de alunas"),
+            tabela(["Data", "Aluna", "Forma", "Conta", "Observação", "Valor"],
+              pagAlunas.map((p) => [
+                curto(p.data || ""), p.aluna,
+                p.ehMatricula ? "matrícula marcada como paga" : (p.forma || ""),
+                p.conta || "", p.obs || "", p.ehMatricula ? "—" : brl(p.valor),
+              ]), [5]),
+
+            titulo2("Produtos"),
+            tabela(["Produto", "Início", "Usado", "Sobrou", "Mínimo"],
+              (estoque || []).map((p) => {
+                const i0 = toNum(p.inicial), at = toNum(p.qtd);
+                return [p.nome, String(i0), String(Math.max(i0 - at, 0)), String(at), String(toNum(p.min))];
+              }), [1, 2, 3, 4]),
+
+            vazio(),
+          ],
+        }],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      const nome = `relatorio-mentoria-hof-${ini}${varios ? "_a_" + fim : ""}.docx`;
+      const tipo = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+      // No iPhone o download por link e ignorado; o menu de compartilhar funciona.
+      try {
+        const file = new File([blob], nome, { type: tipo });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: "Relatório Mentoria HOF" });
+          return;
+        }
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = nome;
-      a.rel = "noopener";
+      a.href = url; a.download = nome; a.rel = "noopener";
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 4000);
     } catch (e) {
-      setErroArquivo("Não consegui gerar o arquivo neste aparelho. Use o botão Imprimir e escolha \"Salvar em PDF\".");
+      setErroArquivo('Não consegui gerar o arquivo. Use o botão Imprimir e escolha "Salvar em PDF".');
+    } finally {
+      setGerando(false);
     }
   };
 
@@ -256,9 +271,10 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
         <div className="flex items-center justify-between mb-3">
           <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Relatório</div>
           <div className="flex gap-2">
-            <button onClick={baixarWord} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
-                    style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>
-              <FileDown size={15} /> Word
+            <button onClick={baixarWord} disabled={gerando}
+                    className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
+                    style={{ background: C.surface, color: gerando ? C.muted : C.ink, border: `1px solid ${C.line}` }}>
+              <FileDown size={15} /> {gerando ? "Gerando…" : "Word"}
             </button>
             <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
                     style={{ background: C.ink, color: "#fff" }}>
