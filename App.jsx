@@ -3,7 +3,7 @@ import {
   Calendar, Plus, Phone, Trash2, Pencil, ChevronLeft, ChevronRight,
   Search, X, Check, CalendarDays, User, Instagram, AlertCircle,
   Users, Wallet, TrendingUp, List, Clock, RotateCcw, PhoneCall, MessageCircle, Package, Minus, Eye, EyeOff, LogOut,
-  FileSpreadsheet, ClipboardList, GraduationCap,
+  FileSpreadsheet, ClipboardList, GraduationCap, FileText,
 } from "lucide-react";
 import { auth as fbAuth } from "./firebase";
 import { store } from "./store";
@@ -15,6 +15,7 @@ const FaturamentoChart = React.lazy(() => import("./Chart"));
 const ExportView = React.lazy(() => import("./Export"));
 const ProcedimentosView = React.lazy(() => import("./Procedimentos"));
 const AlunasView = React.lazy(() => import("./Alunas"));
+const RelatorioView = React.lazy(() => import("./Relatorio"));
 
 // ---- Tema ------------------------------------------------------------------
 const C = {
@@ -465,6 +466,7 @@ export default function App() {
     { id: "pagamentos", label: "Pagamentos", icon: Wallet },
     { id: "faturamento", label: "Faturamento", icon: TrendingUp },
     { id: "estoque", label: "Estoque", icon: Package },
+    { id: "relatorio", label: "Relatório", icon: FileText },
     { id: "alunas", label: "Alunas", icon: GraduationCap },
     { id: "procedimentos", label: "Procedimentos", icon: ClipboardList },
     { id: "exportar", label: "Exportar", icon: FileSpreadsheet },
@@ -666,6 +668,10 @@ export default function App() {
           <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
         ) : view === "estoque" ? (
           <EstoqueView estoque={estoque} onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
+        ) : view === "relatorio" ? (
+          <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
+            <RelatorioView items={items} alunas={alunas} estoque={estoque} C={C} />
+          </Suspense>
         ) : view === "alunas" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
             <AlunasView alunas={alunas} curso={curso} onSaveAlunas={persistAlunas} onSaveCurso={persistCurso} C={C} />
