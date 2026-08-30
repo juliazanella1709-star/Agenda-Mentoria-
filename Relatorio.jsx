@@ -34,6 +34,7 @@ const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []
 export default function RelatorioView({ items, alunas, estoque, C }) {
   const [dia, setDia] = useState(keyOf(new Date()));
   const [modo, setModo] = useState("dia");        // dia | periodo
+  const [erroArquivo, setErroArquivo] = useState("");
   const [de, setDe] = useState(keyOf(new Date()));
   const [ate, setAte] = useState(keyOf(new Date()));
   const andar = (n) => { const d = parseKey(dia); d.setDate(d.getDate() + n); setDia(keyOf(d)); };
@@ -120,7 +121,7 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
 
   // Monta o relatorio como documento do Word. Usa HTML com o cabecalho que o
   // Word reconhece: abre formatado e permite editar, sem biblioteca extra.
-  const baixarWord = () => {
+  const baixarWord = async () => {
     const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const vermelho = (txt) => ({ html: `<b style="color:#C0392B">${esc(txt)}</b>` });
     const tabela = (cabs, linhas, alinhaDir = []) => {
@@ -208,13 +209,34 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       ${tabela(["Produto", "Início", "Usado", "Sobrou", "Mínimo"], linhasProd, [1, 2, 3, 4])}
       </body></html>`;
 
+    const nome = `relatorio-mentoria-hof-${ini}${varios ? "_a_" + fim : ""}.doc`;
     const blob = new Blob(["\ufeff", html], { type: "application/msword" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `relatorio-mentoria-hof-${ini}${varios ? "_a_" + fim : ""}.doc`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    // No iPhone o download por link e ignorado pelo Safari. Quando existe o menu
+    // de compartilhar do sistema, usa ele: da para salvar nos Arquivos ou enviar
+    // direto pelo WhatsApp. Nos outros aparelhos, baixa normal.
+    try {
+      const file = new File([blob], nome, { type: "application/msword" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Relatório Mentoria HOF" });
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === "AbortError") return;   // a pessoa fechou o menu
+      // qualquer outro problema: segue para o download normal
+    }
+
+    try {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nome;
+      a.rel = "noopener";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {
+      setErroArquivo("Não consegui gerar o arquivo neste aparelho. Use o botão Imprimir e escolha \"Salvar em PDF\".");
+    }
   };
 
   const card = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16 };
@@ -279,6 +301,12 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
           </div>
         )}
       </div>
+
+      {erroArquivo && (
+        <div className="ag-noprint text-xs p-3 mb-3 rounded-xl flex gap-2" style={{ background: C.coralSoft, color: C.coral }}>
+          <AlertCircle size={14} className="shrink-0 mt-0.5" /> <span>{erroArquivo}</span>
+        </div>
+      )}
 
       {/* cabecalho que aparece so no papel */}
       <div className="ag-print-only" style={{ marginBottom: 14 }}>
