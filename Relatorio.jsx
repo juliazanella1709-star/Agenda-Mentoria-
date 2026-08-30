@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight, AlertCircle, Printer, FileDown } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertCircle, Printer } from "lucide-react";
 
 // Aba "Relatório": fechamento de um dia - o que entrou, como foi pago, quais
 // atendimentos, os pagamentos das alunas e a posicao do estoque.
@@ -34,8 +34,6 @@ const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []
 export default function RelatorioView({ items, alunas, estoque, C }) {
   const [dia, setDia] = useState(keyOf(new Date()));
   const [modo, setModo] = useState("dia");        // dia | periodo
-  const [erroArquivo, setErroArquivo] = useState("");
-  const [gerando, setGerando] = useState(false);
   const [de, setDe] = useState(keyOf(new Date()));
   const [ate, setAte] = useState(keyOf(new Date()));
   const andar = (n) => { const d = parseKey(dia); d.setDate(d.getDate() + n); setDia(keyOf(d)); };
@@ -120,140 +118,6 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
   }, [consultas, pagAlunas]);
 
 
-  // Gera um .docx de verdade (Office Open XML). O formato antigo era HTML com
-  // extensao .doc: o Word abria, mas Pages e iPhone nao. A biblioteca entra por
-  // import dinamico, entao so e baixada quando alguem exporta.
-  const VERMELHO = "C0392B";
-  const baixarWord = async () => {
-    setErroArquivo("");
-    setGerando(true);
-    try {
-      const D = await import("docx");
-      const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-              HeadingLevel, WidthType, AlignmentType, BorderStyle } = D;
-
-      const txt = (t, o = {}) => new TextRun({ text: String(t == null ? "" : t), ...o });
-      const cel = (filhos, dir = false) => new TableCell({
-        children: [new Paragraph({ children: Array.isArray(filhos) ? filhos : [filhos],
-                                   alignment: dir ? AlignmentType.RIGHT : AlignmentType.LEFT })],
-        margins: { top: 60, bottom: 60, left: 100, right: 100 },
-      });
-      const tabela = (cabs, linhas, dirs = []) => new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-          new TableRow({
-            tableHeader: true,
-            children: cabs.map((c, i) => cel(txt(c, { bold: true, size: 19 }), dirs.includes(i))),
-          }),
-          ...(linhas.length ? linhas : [[ "—" ]]).map((l) => new TableRow({
-            children: (Array.isArray(l) ? l : [l]).map((c, i) =>
-              cel(Array.isArray(c) ? c : txt(c, { size: 19 }), dirs.includes(i))),
-          })),
-        ],
-      });
-      const titulo2 = (t) => new Paragraph({ text: t, heading: HeadingLevel.HEADING_2, spacing: { before: 280, after: 100 } });
-      const vazio = () => new Paragraph({ text: "" });
-
-      // celula do valor: parceria riscada e desconto destacado, como na tela
-      const celValor = (it) => {
-        if (it.parceria) return [
-          txt(brl(valorDe(it)), { strike: true, color: "888888", size: 19 }),
-          txt("  PARCERIA", { bold: true, color: VERMELHO, size: 19 }),
-        ];
-        if (descontoDe(it) > 0) return [
-          txt(brl(it.valor), { strike: true, color: "888888", size: 19 }),
-          txt("  " + brl(valorDe(it)), { bold: true, size: 19 }),
-          txt("  (desc. " + brl(descontoDe(it)) + ")", { color: VERMELHO, size: 19 }),
-        ];
-        return txt(brl(valorDe(it)), { size: 19 });
-      };
-
-      const doc = new Document({
-        sections: [{
-          children: [
-            new Paragraph({ children: [txt("Mentoria HOF — Relatório", { bold: true, size: 32 })] }),
-            new Paragraph({ children: [txt(titulo, { color: "666666", size: 20 })], spacing: { after: 200 } }),
-
-            titulo2("Resumo"),
-            tabela(["Item", "Valor"], [
-              ["Entrou no período", brl(totais.total)],
-              ["   Atendimentos", brl(totais.recConsultas)],
-              ["   Alunas", brl(totais.recAlunas)],
-              ["Previsto (valor dos atendimentos)", brl(totais.previsto)],
-              ["A receber", brl(totais.aReceber)],
-              [[txt("Parcerias (sem cobrança)", { bold: true, color: VERMELHO, size: 19 })],
-               [txt(brl(totais.parcerias), { bold: true, color: VERMELHO, size: 19 })]],
-              [[txt("Descontos concedidos", { bold: true, color: VERMELHO, size: 19 })],
-               [txt(brl(totais.descontos), { bold: true, color: VERMELHO, size: 19 })]],
-            ], [1]),
-
-            titulo2("Como foi pago"),
-            tabela(["Forma", "Valor"], totais.porForma.map(([f, v]) => [f, brl(v)]), [1]),
-
-            titulo2("Entrou em cada conta"),
-            tabela(["Conta", "Forma", "Valor"], totais.porConta.flatMap((c) => [
-              [[txt(c.nome, { bold: true, size: 19 })], "", [txt(brl(c.total), { bold: true, size: 19 })]],
-              ...c.formas.map(([f, v]) => ["", f, brl(v)]),
-            ]), [2]),
-
-            titulo2(`Atendimentos (${consultas.length})`),
-            tabela(["Data", "Hora", "Paciente", "Procedimentos", "Valor", "Pago", "Forma", "Falta"],
-              consultas.map((it) => [
-                curto(it.date), it.time || "", it.patient || "", procsLabel(it) || "—",
-                celValor(it),
-                it.parceria ? [txt("sem cobrança", { bold: true, color: VERMELHO, size: 19 })] : brl(totalPagoDe(it)),
-                pagList(it).filter((x) => toNum(x.valor) > 0)
-                  .map((x) => `${x.forma || "?"}${x.conta ? " " + x.conta : ""}`).join(" + "),
-                saldoDe(it) > 0 ? brl(saldoDe(it)) : "",
-              ]), [4, 5, 7]),
-
-            titulo2("Pagamentos de alunas"),
-            tabela(["Data", "Aluna", "Forma", "Conta", "Observação", "Valor"],
-              pagAlunas.map((p) => [
-                curto(p.data || ""), p.aluna,
-                p.ehMatricula ? "matrícula marcada como paga" : (p.forma || ""),
-                p.conta || "", p.obs || "", p.ehMatricula ? "—" : brl(p.valor),
-              ]), [5]),
-
-            titulo2("Produtos"),
-            tabela(["Produto", "Início", "Usado", "Sobrou", "Mínimo"],
-              (estoque || []).map((p) => {
-                const i0 = toNum(p.inicial), at = toNum(p.qtd);
-                return [p.nome, String(i0), String(Math.max(i0 - at, 0)), String(at), String(toNum(p.min))];
-              }), [1, 2, 3, 4]),
-
-            vazio(),
-          ],
-        }],
-      });
-
-      const blob = await Packer.toBlob(doc);
-      const nome = `relatorio-mentoria-hof-${ini}${varios ? "_a_" + fim : ""}.docx`;
-      const tipo = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-      // No iPhone o download por link e ignorado; o menu de compartilhar funciona.
-      try {
-        const file = new File([blob], nome, { type: tipo });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: "Relatório Mentoria HOF" });
-          return;
-        }
-      } catch (e) {
-        if (e && e.name === "AbortError") return;
-      }
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = nome; a.rel = "noopener";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-    } catch (e) {
-      setErroArquivo('Não consegui gerar o arquivo. Use o botão Imprimir e escolha "Salvar em PDF".');
-    } finally {
-      setGerando(false);
-    }
-  };
-
   const card = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16 };
   const Secao = ({ titulo, extra, children }) => (
     <div className="mb-4 ag-bloco" style={{ ...card, overflow: "hidden" }}>
@@ -270,17 +134,10 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       <div className="ag-noprint">
         <div className="flex items-center justify-between mb-3">
           <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Relatório</div>
-          <div className="flex gap-2">
-            <button onClick={baixarWord} disabled={gerando}
-                    className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
-                    style={{ background: C.surface, color: gerando ? C.muted : C.ink, border: `1px solid ${C.line}` }}>
-              <FileDown size={15} /> {gerando ? "Gerando…" : "Word"}
-            </button>
-            <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
-                    style={{ background: C.ink, color: "#fff" }}>
-              <Printer size={15} /> Imprimir
-            </button>
-          </div>
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
+                  style={{ background: C.ink, color: "#fff" }}>
+            <Printer size={15} /> Salvar / Imprimir
+          </button>
         </div>
 
         <div className="flex gap-2 mb-3">
@@ -289,6 +146,12 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
                     style={{ background: modo === k ? C.ink : C.surface, color: modo === k ? "#fff" : C.muted,
                              border: `1px solid ${modo === k ? C.ink : C.line}` }}>{l}</button>
           ))}
+        </div>
+
+        <div className="text-xs mb-3 p-2.5 rounded-lg" style={{ color: C.muted, background: C.tealSoft }}>
+          Para guardar ou enviar: toque em <b>Salvar / Imprimir</b> e escolha <b>Salvar em PDF</b>
+          (no iPhone, <b>Opções → Salvar em Arquivos</b>). O PDF sai igual ao que você vê aqui e
+          abre em qualquer aparelho.
         </div>
 
         {modo === "dia" ? (
@@ -317,12 +180,6 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
           </div>
         )}
       </div>
-
-      {erroArquivo && (
-        <div className="ag-noprint text-xs p-3 mb-3 rounded-xl flex gap-2" style={{ background: C.coralSoft, color: C.coral }}>
-          <AlertCircle size={14} className="shrink-0 mt-0.5" /> <span>{erroArquivo}</span>
-        </div>
-      )}
 
       {/* cabecalho que aparece so no papel */}
       <div className="ag-print-only" style={{ marginBottom: 14 }}>
