@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight, AlertCircle, Printer } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertCircle, Printer, FileDown } from "lucide-react";
 
 // Aba "Relatório": fechamento de um dia - o que entrou, como foi pago, quais
 // atendimentos, os pagamentos das alunas e a posicao do estoque.
@@ -91,12 +91,111 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
     }
     return {
       recConsultas, recAlunas, total: recConsultas + recAlunas,
+      parcerias: consultas.filter((it) => it.parceria).reduce((s, it) => s + valorDe(it), 0),
+      qtdParcerias: consultas.filter((it) => it.parceria).length,
+      descontos: consultas.reduce((s, it) => s + descontoDe(it), 0),
       previsto: consultas.reduce((s, it) => s + valorDe(it), 0),
       aReceber: consultas.reduce((s, it) => s + saldoDe(it), 0),
       porForma: Object.entries(porForma).sort((a, b) => b[1] - a[1]),
       porConta: Object.entries(porConta).sort((a, b) => b[1] - a[1]),
     };
   }, [consultas, pagAlunas]);
+
+
+  // Monta o relatorio como documento do Word. Usa HTML com o cabecalho que o
+  // Word reconhece: abre formatado e permite editar, sem biblioteca extra.
+  const baixarWord = () => {
+    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const vermelho = (txt) => ({ html: `<b style="color:#C0392B">${esc(txt)}</b>` });
+    const tabela = (cabs, linhas, alinhaDir = []) => {
+      if (!linhas.length) return "<p style='color:#777'>Nada no período.</p>";
+      const th = cabs.map((c, i) => `<th style="text-align:${alinhaDir.includes(i) ? "right" : "left"}">${esc(c)}</th>`).join("");
+      const tr = linhas.map((l) =>
+        `<tr>${l.map((c, i) => {
+          const conteudo = c && typeof c === "object" && c.html !== undefined ? c.html : esc(c);
+          return `<td style="text-align:${alinhaDir.includes(i) ? "right" : "left"}">${conteudo}</td>`;
+        }).join("")}</tr>`
+      ).join("");
+      return `<table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+    };
+
+    const celValor = (it) => {
+      if (it.parceria) {
+        return { html: `<s style="color:#888">${esc(brl(valorDe(it)))}</s><br>` +
+                       `<b style="color:#C0392B">PARCERIA</b>` };
+      }
+      if (descontoDe(it) > 0) {
+        return { html: `<s style="color:#888">${esc(brl(it.valor))}</s><br>` +
+                       `<b>${esc(brl(valorDe(it)))}</b><br>` +
+                       `<span style="color:#C0392B">desconto ${esc(brl(descontoDe(it)))}</span>` };
+      }
+      return brl(valorDe(it));
+    };
+    const linhasAtend = consultas.map((it) => [
+      curto(it.date), it.time || "", it.patient || "", procsLabel(it) || "—",
+      celValor(it),
+      it.parceria ? { html: '<b style="color:#C0392B">sem cobrança</b>' } : brl(totalPagoDe(it)),
+      pagList(it).filter((x) => toNum(x.valor) > 0).map((x) => `${x.forma || "?"}${x.conta ? " " + x.conta : ""}`).join(" + "),
+      saldoDe(it) > 0 ? brl(saldoDe(it)) : "",
+    ]);
+    const linhasAlunas = pagAlunas.map((p) => [
+      curto(p.data || ""), p.aluna, p.ehMatricula ? "matrícula marcada como paga" : (p.forma || ""),
+      p.obs || "", p.ehMatricula ? "—" : brl(p.valor),
+    ]);
+    const linhasProd = (estoque || []).map((p) => {
+      const ini = toNum(p.inicial), atual = toNum(p.qtd);
+      return [p.nome, ini, Math.max(ini - atual, 0), atual, toNum(p.min)];
+    });
+
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+      <head><meta charset="utf-8"><title>Relatório</title>
+      <style>
+        body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222}
+        h1{font-size:16pt;margin:0 0 2pt}
+        h2{font-size:12pt;margin:16pt 0 4pt;border-bottom:1px solid #ccc;padding-bottom:2pt}
+        .sub{color:#666;font-size:10pt;margin:0 0 12pt}
+        table{border-collapse:collapse;width:100%;margin:4pt 0}
+        th,td{border:1px solid #d5d5d5;padding:4pt 6pt;font-size:10pt}
+        th{background:#f2f0ee}
+        .tot{font-size:14pt;font-weight:bold}
+      </style></head><body>
+      <h1>Mentoria HOF — Relatório</h1>
+      <p class="sub">${esc(titulo)}</p>
+
+      <h2>Resumo</h2>
+      ${tabela(["Item", "Valor"], [
+        ["Entrou no período", brl(totais.total)],
+        ["  Atendimentos", brl(totais.recConsultas)],
+        ["  Alunas", brl(totais.recAlunas)],
+        ["Previsto (valor dos atendimentos)", brl(totais.previsto)],
+        ["A receber", brl(totais.aReceber)],
+        [vermelho("Parcerias (sem cobrança)"), vermelho(brl(totais.parcerias))],
+        [vermelho("Descontos concedidos"), vermelho(brl(totais.descontos))],
+      ], [1])}
+
+      <h2>Como foi pago</h2>
+      ${tabela(["Forma", "Valor"], totais.porForma.map(([f, v]) => [f, brl(v)]), [1])}
+      ${totais.porConta.length ? `<h2>Por conta (atendimentos)</h2>${tabela(["Conta", "Valor"], totais.porConta.map(([c, v]) => [c, brl(v)]), [1])}` : ""}
+
+      <h2>Atendimentos (${consultas.length})</h2>
+      ${tabela(["Data", "Hora", "Paciente", "Procedimentos", "Valor", "Pago", "Forma", "Falta"], linhasAtend, [4, 5, 7])}
+
+      <h2>Pagamentos de alunas</h2>
+      ${tabela(["Data", "Aluna", "Forma", "Observação", "Valor"], linhasAlunas, [4])}
+
+      <h2>Produtos</h2>
+      ${tabela(["Produto", "Início", "Usado", "Sobrou", "Mínimo"], linhasProd, [1, 2, 3, 4])}
+      </body></html>`;
+
+    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio-mentoria-hof-${ini}${varios ? "_a_" + fim : ""}.doc`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   const card = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16 };
   const Secao = ({ titulo, extra, children }) => (
@@ -114,10 +213,16 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       <div className="ag-noprint">
         <div className="flex items-center justify-between mb-3">
           <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Relatório</div>
-          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
-                  style={{ background: C.ink, color: "#fff" }}>
-            <Printer size={15} /> Imprimir
-          </button>
+          <div className="flex gap-2">
+            <button onClick={baixarWord} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
+                    style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>
+              <FileDown size={15} /> Word
+            </button>
+            <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
+                    style={{ background: C.ink, color: "#fff" }}>
+              <Printer size={15} /> Imprimir
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2 mb-3">
@@ -194,6 +299,19 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
         </Secao>
       )}
 
+      {totais.parcerias > 0 && (
+        <div className="p-3.5 mb-4 ag-bloco rounded-2xl flex items-center justify-between"
+             style={{ background: C.tealSoft, border: `1px solid ${C.teal}33` }}>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: C.teal }}>
+              {totais.qtdParcerias} {totais.qtdParcerias === 1 ? "parceria" : "parcerias"}
+            </div>
+            <div className="text-xs" style={{ color: C.muted }}>Procedimento feito sem cobrança — não entra no caixa</div>
+          </div>
+          <div className="ff-d" style={{ fontSize: 20, fontWeight: 700, color: C.teal }}>{brl(totais.parcerias)}</div>
+        </div>
+      )}
+
       {/* ---- atendimentos ---- */}
       <Secao titulo="Atendimentos" extra={`${consultas.length} · previsto ${brl(totais.previsto)}`}>
         {consultas.length === 0 && (
@@ -213,15 +331,26 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
                   <div className="text-xs mt-0.5" style={{ color: C.muted }}>{procsLabel(it) || "—"}</div>
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="text-sm font-semibold" style={{ color: C.ink }}>{brl(valorDe(it))}</div>
-                  {descontoDe(it) > 0 && (
-                    <div className="text-xs" style={{ color: C.muted }}>desc. {brl(descontoDe(it))}</div>
+                  {it.parceria ? (
+                    <>
+                      <div className="text-sm" style={{ color: C.muted, textDecoration: "line-through" }}>{brl(valorDe(it))}</div>
+                      <div className="text-xs" style={{ color: "#C0392B", fontWeight: 800, letterSpacing: ".04em" }}>PARCERIA</div>
+                    </>
+                  ) : descontoDe(it) > 0 ? (
+                    <>
+                      <div className="text-xs" style={{ color: C.muted, textDecoration: "line-through" }}>{brl(it.valor)}</div>
+                      <div className="text-sm font-semibold" style={{ color: C.ink }}>{brl(valorDe(it))}</div>
+                      <div className="text-xs" style={{ color: "#C0392B", fontWeight: 700 }}>desconto {brl(descontoDe(it))}</div>
+                    </>
+                  ) : (
+                    <div className="text-sm font-semibold" style={{ color: C.ink }}>{brl(valorDe(it))}</div>
                   )}
                 </div>
               </div>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 {it.parceria ? (
-                  <span className="text-xs rounded-md px-1.5 py-0.5" style={{ background: C.tealSoft, color: C.teal }}>parceria</span>
+                  <span className="text-xs rounded-md px-1.5 py-0.5"
+                        style={{ background: "#FBE9E7", color: "#C0392B", fontWeight: 700 }}>sem cobrança — parceria</span>
                 ) : pago > 0 ? (
                   <span className="text-xs" style={{ color: C.goodFg }}>pago {brl(pago)}{formas ? ` · ${formas}` : ""}</span>
                 ) : (
