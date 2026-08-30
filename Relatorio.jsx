@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight, AlertCircle, Printer } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertCircle, Printer, FileDown } from "lucide-react";
 
 // Aba "Relatório": fechamento de um dia - o que entrou, como foi pago, quais
 // atendimentos, os pagamentos das alunas e a posicao do estoque.
@@ -34,6 +34,8 @@ const procsLabel = (it) => [it && it.procedure, ...(((it && it.procedures) || []
 export default function RelatorioView({ items, alunas, estoque, C }) {
   const [dia, setDia] = useState(keyOf(new Date()));
   const [modo, setModo] = useState("dia");        // dia | periodo
+  const [gerando, setGerando] = useState(false);
+  const [erroArquivo, setErroArquivo] = useState("");
   const [de, setDe] = useState(keyOf(new Date()));
   const [ate, setAte] = useState(keyOf(new Date()));
   const andar = (n) => { const d = parseKey(dia); d.setDate(d.getDate() + n); setDia(keyOf(d)); };
@@ -118,6 +120,136 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
   }, [consultas, pagAlunas]);
 
 
+  // Gera o PDF como arquivo, em vez de depender da tela de impressao (que nao
+  // abre no iPhone em modo tela cheia). Texto de verdade, nao imagem: da para
+  // selecionar e copiar, e abre nativo no iPhone e no Mac.
+  const VERM = [192, 57, 43];
+  const CINZA = [120, 120, 120];
+  const baixarPDF = async () => {
+    setErroArquivo(""); setGerando(true);
+    try {
+      const [{ jsPDF }, auto] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const autoTable = auto.default || auto.autoTable;
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const M = 40;
+      let y = 46;
+
+      doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+      doc.text("Mentoria HOF — Relatório", M, y);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(110);
+      y += 15; doc.text(titulo, M, y);
+      doc.setTextColor(0);
+
+      const secao = (nome, head, body, opts = {}) => {
+        autoTable(doc, {
+          startY: y + 18,
+          head: [head], body: body.length ? body : [head.map(() => "—")],
+          margin: { left: M, right: M },
+          styles: { font: "helvetica", fontSize: 9, cellPadding: 4, overflow: "linebreak" },
+          headStyles: { fillColor: [242, 240, 238], textColor: 40, fontStyle: "bold" },
+          didDrawPage: () => {},
+          ...opts,
+        });
+        y = doc.lastAutoTable.finalY;
+        if (y > 720) { doc.addPage(); y = 46; }
+      };
+      const tituloSecao = (t) => {
+        if (y > 700) { doc.addPage(); y = 30; }
+        doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+        doc.text(t, M, y + 30); y += 16;
+        doc.setFont("helvetica", "normal");
+      };
+
+      tituloSecao("Resumo");
+      secao("resumo", ["Item", "Valor"], [
+        ["Entrou no período", brl(totais.total)],
+        ["    Atendimentos", brl(totais.recConsultas)],
+        ["    Alunas", brl(totais.recAlunas)],
+        ["Previsto (valor dos atendimentos)", brl(totais.previsto)],
+        ["A receber", brl(totais.aReceber)],
+        ["Parcerias (sem cobrança)", brl(totais.parcerias)],
+        ["Descontos concedidos", brl(totais.descontos)],
+      ], {
+        columnStyles: { 1: { halign: "right" } },
+        // parcerias e descontos em vermelho
+        didParseCell: (d) => { if (d.section === "body" && d.row.index >= 5) { d.cell.styles.textColor = VERM; d.cell.styles.fontStyle = "bold"; } },
+      });
+
+      tituloSecao("Como foi pago");
+      secao("formas", ["Forma", "Valor"], totais.porForma.map(([f, v]) => [f, brl(v)]),
+        { columnStyles: { 1: { halign: "right" } } });
+
+      tituloSecao("Entrou em cada conta");
+      const linhasConta = totais.porConta.flatMap((c) => [
+        { conta: c.nome, forma: "", valor: brl(c.total), destaque: true },
+        ...c.formas.map(([f, v]) => ({ conta: "", forma: f, valor: brl(v), destaque: false })),
+      ]);
+      secao("contas", ["Conta", "Forma", "Valor"], linhasConta.map((l) => [l.conta, l.forma, l.valor]), {
+        columnStyles: { 2: { halign: "right" } },
+        didParseCell: (d) => { if (d.section === "body" && linhasConta[d.row.index] && linhasConta[d.row.index].destaque) d.cell.styles.fontStyle = "bold"; },
+      });
+
+      tituloSecao(`Atendimentos (${consultas.length})`);
+      const linhasAt = consultas.map((it) => {
+        const valorTxt = it.parceria
+          ? `${brl(valorDe(it))}\nPARCERIA`
+          : descontoDe(it) > 0
+            ? `${brl(it.valor)}\n${brl(valorDe(it))}\ndesc. ${brl(descontoDe(it))}`
+            : brl(valorDe(it));
+        return [
+          curto(it.date), it.time || "", it.patient || "", procsLabel(it) || "—", valorTxt,
+          it.parceria ? "sem cobrança" : brl(totalPagoDe(it)),
+          pagList(it).filter((x) => toNum(x.valor) > 0).map((x) => `${x.forma || "?"}${x.conta ? " " + x.conta : ""}`).join(" + "),
+          saldoDe(it) > 0 ? brl(saldoDe(it)) : "",
+        ];
+      });
+      secao("atend", ["Data", "Hora", "Paciente", "Procedimentos", "Valor", "Pago", "Forma", "Falta"], linhasAt, {
+        columnStyles: { 4: { halign: "right" }, 5: { halign: "right" }, 7: { halign: "right" } },
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 3, overflow: "linebreak" },
+        didParseCell: (d) => {
+          const it = consultas[d.row.index];
+          if (d.section !== "body" || !it) return;
+          if (it.parceria && (d.column.index === 4 || d.column.index === 5)) {
+            d.cell.styles.textColor = VERM; d.cell.styles.fontStyle = "bold";
+          }
+          if (!it.parceria && descontoDe(it) > 0 && d.column.index === 4) d.cell.styles.textColor = VERM;
+        },
+      });
+
+      tituloSecao("Pagamentos de alunas");
+      secao("alunas", ["Data", "Aluna", "Forma", "Conta", "Observação", "Valor"],
+        pagAlunas.map((p) => [curto(p.data || ""), p.aluna,
+          p.ehMatricula ? "matrícula paga" : (p.forma || ""), p.conta || "", p.obs || "",
+          p.ehMatricula ? "—" : brl(p.valor)]),
+        { columnStyles: { 5: { halign: "right" } } });
+
+      tituloSecao("Produtos");
+      secao("prod", ["Produto", "Início", "Usado", "Sobrou", "Mínimo"],
+        (estoque || []).map((p) => { const i0 = toNum(p.inicial), at = toNum(p.qtd);
+          return [p.nome, String(i0), String(Math.max(i0 - at, 0)), String(at), String(toNum(p.min))]; }),
+        { columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } } });
+
+      const nome = `relatorio-mentoria-hof-${ini}${varios ? "_a_" + fim : ""}.pdf`;
+      const blob = doc.output("blob");
+
+      try {
+        const file = new File([blob], nome, { type: "application/pdf" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: "Relatório Mentoria HOF" });
+          return;
+        }
+      } catch (e) { if (e && e.name === "AbortError") return; }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = nome; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {
+      setErroArquivo("Não consegui gerar o PDF neste aparelho. Me avise que eu ajusto.");
+    } finally { setGerando(false); }
+  };
+
   const card = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16 };
   const Secao = ({ titulo, extra, children }) => (
     <div className="mb-4 ag-bloco" style={{ ...card, overflow: "hidden" }}>
@@ -134,10 +266,17 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
       <div className="ag-noprint">
         <div className="flex items-center justify-between mb-3">
           <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Relatório</div>
-          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
-                  style={{ background: C.ink, color: "#fff" }}>
-            <Printer size={15} /> Salvar / Imprimir
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
+                    style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>
+              <Printer size={15} /> Imprimir
+            </button>
+            <button onClick={baixarPDF} disabled={gerando}
+                    className="flex items-center gap-1.5 text-sm rounded-lg px-3 py-2 font-medium"
+                    style={{ background: C.ink, color: "#fff", opacity: gerando ? 0.6 : 1 }}>
+              <FileDown size={15} /> {gerando ? "Gerando…" : "Baixar PDF"}
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2 mb-3">
@@ -149,9 +288,9 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
         </div>
 
         <div className="text-xs mb-3 p-2.5 rounded-lg" style={{ color: C.muted, background: C.tealSoft }}>
-          Para guardar ou enviar: toque em <b>Salvar / Imprimir</b> e escolha <b>Salvar em PDF</b>
-          (no iPhone, <b>Opções → Salvar em Arquivos</b>). O PDF sai igual ao que você vê aqui e
-          abre em qualquer aparelho.
+          <b>Baixar PDF</b> gera o arquivo direto — no iPhone abre o menu de compartilhar (salvar
+          nos Arquivos ou mandar no WhatsApp); no Mac vai para os Downloads. O <b>Imprimir</b>
+          continua ali para quem quiser mandar direto para a impressora.
         </div>
 
         {modo === "dia" ? (
@@ -180,6 +319,12 @@ export default function RelatorioView({ items, alunas, estoque, C }) {
           </div>
         )}
       </div>
+
+      {erroArquivo && (
+        <div className="ag-noprint text-xs p-3 mb-3 rounded-xl flex gap-2" style={{ background: C.coralSoft, color: C.coral }}>
+          <AlertCircle size={14} className="shrink-0 mt-0.5" /> <span>{erroArquivo}</span>
+        </div>
+      )}
 
       {/* cabecalho que aparece so no papel */}
       <div className="ag-print-only" style={{ marginBottom: 14 }}>
