@@ -100,6 +100,22 @@ const msgConfirmacao = (it) => {
   ].join("\n");
 };
 
+// Mensagem do "chamar de volta". Como na confirmacao, nao cita o procedimento:
+// e so o tempo decorrido, que ja basta para a pessoa entender.
+const msgRetorno = (nome, dataUltima, jaVenceu) => {
+  const primeiro = (nome || "").trim().split(/\s+/)[0] || "";
+  const tempo = humanAgo(dataUltima).replace(/^há /, "");
+  // quem ja passou do prazo nao pode ouvir "esta chegando a epoca"
+  const epoca = jaVenceu ? "e já está na época de renovar" : "e está chegando a época de renovar";
+  return [
+    `Olá, ${primeiro}! Tudo bem?`,
+    "",
+    `Já faz ${tempo} do seu último procedimento aqui na Mentoria, ${epoca}.`,
+    "",
+    "Quer que eu veja um horário para você?",
+  ].join("\n");
+};
+
 const prettyDate = (k) => { const d = parseKey(k); return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()].toLowerCase()}`; };
 const shortDate = (k) => { const d = parseKey(k); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
 const ymOf = (k) => k.slice(0, 7);
@@ -1470,7 +1486,7 @@ function ChamarView({ items, chamadas, onChamar, onDesfazer, onHistory, onAgenda
 
             <div className="space-y-2">
               {grupo.linhas.map(({ m, e, marca }) => {
-                const wa = m.phone ? "https://wa.me/55" + m.phone.replace(/\D/g, "") : null;
+                const wa = waLink(m.phone, msgRetorno(m.name, e.date, e.overdue));
                 return (
                   <div key={m.name + e.cat} className="rounded-2xl p-3.5"
                        style={{ background: C.surface, border: `1px solid ${atrasado ? C.coral : C.line}`, opacity: feito ? 0.72 : 1 }}>
