@@ -110,15 +110,16 @@ const trechoMentoria = (datas) => {
   return d ? `Teremos uma nova mentoria ${d}.` : "Teremos uma nova mentoria em breve.";
 };
 
-// Convite aberto, para qualquer paciente da lista.
+// Convite aberto, para qualquer paciente da lista. Texto definido pela clinica.
 const msgConvite = (nome, datas) => {
   const primeiro = (nome || "").trim().split(/\s+/)[0] || "";
+  const d = (datas || "").trim();
   return [
     `Olá, ${primeiro}! Tudo bem?`,
     "",
-    trechoMentoria(datas),
+    `Estou passando para te lembrar que teremos uma nova mentoria de harmonização facial full face${d ? " " + d : " em breve"}.`,
     "",
-    "Gostaria de agendar algum procedimento ou saber mais informações?",
+    "Se tiver interesse em realizar algum procedimento, me chama aqui para verificar alguns horários. Qualquer dúvida, ficamos à disposição.",
   ].join("\n");
 };
 
