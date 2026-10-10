@@ -18,6 +18,10 @@ const dataBR = (k) => { const [y, m, d] = String(k).split("-"); return d ? `${d}
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 const FORMAS = ["Pix", "Dinheiro", "Crédito", "Débito", "Transferência"];
+const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+const capitalizar = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const nomeMes = (ym) => { if (!ym) return "sem mentoria"; const [y, m] = ym.split("-").map(Number); return capitalizar(`${MESES[m - 1]} de ${y}`); };
+const mesAtual = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
 const CONTAS = ["Loan", "Mari"];
 
 // Cada aluna pode ter valores proprios; vazio significa "usa o padrao do curso".
@@ -38,12 +42,24 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
   const [aberta, setAberta] = useState(null);  // id da aluna aberta
   const [form, setForm] = useState(null);
   const [apagar, setApagar] = useState(null);
+  const [filtroMes, setFiltroMes] = useState("todas");
+
+  // meses de mentoria que tem aluna, do mais recente para o mais antigo
+  const mesesMentoria = useMemo(() => {
+    const set = new Set();
+    for (const a of alunas || []) set.add(a.mentoria || "");
+    return [...set].sort().reverse();
+  }, [alunas]);
+  const visiveis = useMemo(
+    () => (alunas || []).filter((a) => (filtroMes === "todas" ? true : (a.mentoria || "") === filtroMes)),
+    [alunas, filtroMes]
+  );
 
   const totais = useMemo(() => {
-    const previsto = (alunas || []).reduce((s, a) => s + totalDe(a, curso), 0);
-    const recebido = (alunas || []).reduce((s, a) => s + pagoDe(a, curso), 0);
+    const previsto = visiveis.reduce((s, a) => s + totalDe(a, curso), 0);
+    const recebido = visiveis.reduce((s, a) => s + pagoDe(a, curso), 0);
     return { previsto, recebido, aReceber: Math.max(previsto - recebido, 0) };
-  }, [alunas, curso]);
+  }, [visiveis, curso]);
 
   const card = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16 };
   const input = { background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink, width: "100%" };
@@ -53,6 +69,7 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
     if (!nome) return;
     const base = {
       nome, telefone: form.telefone || "", modalidade: form.modalidade || "parcelado", obs: form.obs || "",
+      mentoria: form.mentoria || "",
       matriculaPaga: !!form.matriculaPaga, matriculaData: form.matriculaData || "",
       valorMatricula: form.valorMatricula === "" ? "" : toNum(form.valorMatricula),
       valorCurso: form.valorCurso === "" ? "" : toNum(form.valorCurso),
@@ -87,27 +104,40 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
         </button>
       </div>
 
+      {mesesMentoria.length > 1 && (
+        <div className="flex gap-1.5 flex-wrap mb-3">
+          <button onClick={() => setFiltroMes("todas")} className="text-xs rounded-lg px-3 py-1.5 font-medium"
+                  style={{ background: filtroMes === "todas" ? C.ink : C.surface, color: filtroMes === "todas" ? "#fff" : C.muted,
+                           border: `1px solid ${filtroMes === "todas" ? C.ink : C.line}` }}>Todas</button>
+          {mesesMentoria.map((ym) => (
+            <button key={ym} onClick={() => setFiltroMes(ym)} className="text-xs rounded-lg px-3 py-1.5 font-medium"
+                    style={{ background: filtroMes === ym ? C.ink : C.surface, color: filtroMes === ym ? "#fff" : C.muted,
+                             border: `1px solid ${filtroMes === ym ? C.ink : C.line}` }}>{nomeMes(ym)}</button>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2 mb-4">
         <Mini label="Previsto" value={brl(totais.previsto)} C={C} />
         <Mini label="Recebido" value={brl(totais.recebido)} C={C} cor={C.goodFg} />
         <Mini label="A receber" value={brl(totais.aReceber)} C={C} cor={totais.aReceber > 0 ? C.coral : C.muted} />
       </div>
 
-      <button onClick={() => setForm({ nome: "", telefone: "", modalidade: "parcelado", obs: "",
+      <button onClick={() => setForm({ nome: "", telefone: "", modalidade: "parcelado", obs: "", mentoria: mesAtual(),
                                        matriculaPaga: false, matriculaData: "", valorMatricula: "", valorCurso: "", parcelas: "" })}
               className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
               style={{ background: C.ink, color: "#fff" }}>
         <Plus size={17} /> Nova aluna
       </button>
 
-      {(alunas || []).length === 0 && (
+      {visiveis.length === 0 && (
         <div className="text-center py-12 text-sm rounded-2xl" style={{ ...card, color: C.muted }}>
           Nenhuma aluna cadastrada ainda.
         </div>
       )}
 
       <div className="space-y-2">
-        {(alunas || []).map((a) => {
+        {visiveis.map((a) => {
           const total = totalDe(a, curso), pago = pagoDe(a, curso), saldo = saldoDe(a, curso);
           const quit = saldo <= 0;
           const pct = total > 0 ? Math.min((pago / total) * 100, 100) : 0;
@@ -117,7 +147,8 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
                 <button onClick={() => setAberta(a.id)} className="flex-1 min-w-0 text-left">
                   <div className="font-semibold truncate" style={{ color: C.ink }}>{a.nome}</div>
                   <div className="text-xs mt-0.5" style={{ color: C.muted }}>
-                    {a.modalidade === "avista" ? "Pix à vista" : `${parcelasDe(a, curso)}x de ${brl(valorParcelaDe(a, curso))}`}
+                    <span>{nomeMes(a.mentoria)}</span>
+                    {" · "}{a.modalidade === "avista" ? "Pix à vista" : `${parcelasDe(a, curso)}x de ${brl(valorParcelaDe(a, curso))}`}
                     {a.matriculaPaga ? " · matrícula paga" : " · matrícula em aberto"}
                     {a.telefone ? ` · ${a.telefone}` : ""}
                   </div>
@@ -151,6 +182,12 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
           <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome completo" style={input} />
           <div className="text-xs mb-1 mt-3" style={{ color: C.muted }}>Telefone</div>
           <input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(00) 00000-0000" style={input} />
+
+          <label className="block mt-3">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Mentoria que ela faz</div>
+            <input type="month" value={form.mentoria || ""} onChange={(e) => setForm({ ...form, mentoria: e.target.value })} style={input} />
+            <div className="text-xs mt-1" style={{ color: C.faint }}>Serve para separar as turmas: {nomeMes(form.mentoria)}</div>
+          </label>
 
           <div className="text-xs mb-1.5 mt-3" style={{ color: C.muted }}>Forma de pagamento do curso</div>
           <div className="flex gap-2">

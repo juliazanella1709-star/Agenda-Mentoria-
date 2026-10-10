@@ -18,6 +18,9 @@ const toNum = (s) => {
 };
 const brl = (v) => toNum(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const procsDe = (it) => [it && it.procedure, ...(((it && it.procedures) || []))].filter(Boolean);
+const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+const capitalizar = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const nomeMes = (ym) => { const [y, m] = ym.split("-").map(Number); return capitalizar(`${MESES[m - 1]} de ${y}`); };
 
 export default function ProcedimentosView({ items, procs, onSaveProcs, onRename, C }) {
   const [tela, setTela] = useState("agendados");
@@ -44,19 +47,28 @@ export default function ProcedimentosView({ items, procs, onSaveProcs, onRename,
 // ---------------------------------------------------------------- agendados
 function Agendados({ items, procs, C, card, chip }) {
   const hoje = new Date();
-  const [periodo, setPeriodo] = useState("total");
+  const [periodo, setPeriodo] = useState("total");   // total | mes | custom
+  const [mes, setMes] = useState("");                 // AAAA-MM escolhido
   const [de, setDe] = useState(keyOf(new Date(hoje.getFullYear(), hoje.getMonth(), 1)));
   const [ate, setAte] = useState(keyOf(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0)));
   const [ocultarZerados, setOcultarZerados] = useState(false);
 
+  // meses que tem atendimento, do mais recente para o mais antigo
+  const mesesComAtendimento = useMemo(() => {
+    const set = new Set();
+    for (const it of items || []) if (it.status !== "cancelado" && procsDe(it).length) set.add(String(it.date).slice(0, 7));
+    return [...set].sort().reverse();
+  }, [items]);
+  const mesAtivo = mes || mesesComAtendimento[0] || keyOf(hoje).slice(0, 7);
+
   const janela = useMemo(() => {
     if (periodo === "total") return null;
     if (periodo === "mes") {
-      return { de: keyOf(new Date(hoje.getFullYear(), hoje.getMonth(), 1)),
-               ate: keyOf(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0)) };
+      const [y, m] = mesAtivo.split("-").map(Number);
+      return { de: keyOf(new Date(y, m - 1, 1)), ate: keyOf(new Date(y, m, 0)) };
     }
     return { de, ate };
-  }, [periodo, de, ate]);
+  }, [periodo, de, ate, mesAtivo]);
 
   const contagem = useMemo(() => {
     const m = {};
@@ -90,9 +102,23 @@ function Agendados({ items, procs, C, card, chip }) {
         <div className="text-sm font-medium mb-3" style={{ color: C.ink }}>Período</div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setPeriodo("total")} style={chip(periodo === "total")}>Total geral</button>
-          <button onClick={() => setPeriodo("mes")} style={chip(periodo === "mes")}>Este mês</button>
+          <button onClick={() => setPeriodo("mes")} style={chip(periodo === "mes")}>Por mês</button>
           <button onClick={() => setPeriodo("custom")} style={chip(periodo === "custom")}>Escolher datas</button>
         </div>
+        {periodo === "mes" && mesesComAtendimento.length > 0 && (
+          <div className="flex gap-1.5 flex-wrap mt-3">
+            {mesesComAtendimento.map((ym) => (
+              <button key={ym} onClick={() => setMes(ym)}
+                      className="text-xs rounded-lg px-3 py-1.5 font-medium"
+                      style={{ background: mesAtivo === ym ? C.coralSoft : C.surface,
+                               color: mesAtivo === ym ? C.coral : C.muted,
+                               border: `1px solid ${mesAtivo === ym ? C.coral : C.line}` }}>
+                {nomeMes(ym)}
+              </button>
+            ))}
+          </div>
+        )}
+
         {periodo === "custom" && (
           <div className="flex gap-2 mt-3">
             <label className="flex-1">

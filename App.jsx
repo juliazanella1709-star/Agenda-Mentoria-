@@ -316,6 +316,7 @@ const STOCK_KEY = "agenda:estoque:v1";
 const PROCS_KEY = "agenda:procedimentos:v1";
 const CHAMADAS_KEY = "agenda:chamadas:v1";
 const MENTORIA_KEY = "agenda:mentoria:v1";
+const ESTOQUE_MESES_KEY = "agenda:estoque-meses:v1";
 const ALUNAS_KEY = "agenda:alunas:v1";
 const CURSO_KEY = "agenda:curso:v1";
 // Valores padrao do curso; ficam editaveis na propria aba.
@@ -344,6 +345,7 @@ export default function App() {
   const [procs, setProcs] = useState(PROCS_PADRAO);
   // { "nome|categoria": { em: "AAAA-MM-DD", ref: data da consulta que gerou o prazo } }
   const [chamadas, setChamadas] = useState({});
+  const [estoqueMeses, setEstoqueMeses] = useState([]); // [{ ym, fechadoEm, itens:[{nome,inicial,usado,final}] }]
   const [mentoriaDatas, setMentoriaDatas] = useState(""); // ex: "nos dias 12 e 13 de novembro"
   const [alunas, setAlunas] = useState([]);
   const [curso, setCurso] = useState(CURSO_PADRAO);
@@ -390,9 +392,9 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e, pr, ch, al, cu, mt] = await Promise.all([
+      const [c, n, p, e, pr, ch, al, cu, mt, em] = await Promise.all([
         ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY), ler(CHAMADAS_KEY),
-        ler(ALUNAS_KEY), ler(CURSO_KEY), ler(MENTORIA_KEY),
+        ler(ALUNAS_KEY), ler(CURSO_KEY), ler(MENTORIA_KEY), ler(ESTOQUE_MESES_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
@@ -404,6 +406,7 @@ export default function App() {
       const val = parse(al); if (val) setAlunas(val);
       const vcu = parse(cu); if (vcu) setCurso({ ...CURSO_PADRAO, ...vcu });
       const vmt = parse(mt); if (vmt && typeof vmt.datas === "string") setMentoriaDatas(vmt.datas);
+      const vem = parse(em); if (Array.isArray(vem)) setEstoqueMeses(vem);
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -451,6 +454,26 @@ export default function App() {
     setItems(next);
     try { await store.set(STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
     flash(`${ids.length} ${ids.length === 1 ? "consulta corrigida" : "consultas corrigidas"}.`);
+  };
+  // Fecha o mes do estoque: guarda quanto foi usado e recomeca a contagem do
+  // zero, com o saldo atual virando o novo "inicial".
+  const fecharMesEstoque = async (ym) => {
+    const itens = (estoque || []).map((i) => ({
+      nome: i.nome,
+      inicial: toNum(i.inicial),
+      usado: Math.max(toNum(i.inicial) - toNum(i.qtd), 0),
+      final: toNum(i.qtd),
+    }));
+    const historico = [...(estoqueMeses || []).filter((m) => m.ym !== ym), { ym, fechadoEm: todayKey(), itens }]
+      .sort((a, b) => b.ym.localeCompare(a.ym));
+    setEstoqueMeses(historico);
+    const zerado = (estoque || []).map((i) => ({ ...i, inicial: toNum(i.qtd) }));
+    setEstoque(zerado);
+    try {
+      await store.set(ESTOQUE_MESES_KEY, JSON.stringify(historico));
+      await store.set(STOCK_KEY, JSON.stringify(zerado));
+    } catch (_) {}
+    flash(`Mês fechado. A contagem recomeça do zero.`);
   };
   const persistMentoria = async (datas) => { setMentoriaDatas(datas); try { await store.set(MENTORIA_KEY, JSON.stringify({ datas })); } catch (_) {} };
   const persistAlunas = async (next) => { setAlunas(next); try { await store.set(ALUNAS_KEY, JSON.stringify(next)); } catch (_) {} };
@@ -760,7 +783,8 @@ export default function App() {
         ) : view === "pagamentos" ? (
           <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
         ) : view === "estoque" ? (
-          <EstoqueView estoque={estoque} onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
+          <EstoqueView estoque={estoque} meses={estoqueMeses} onFecharMes={fecharMesEstoque}
+                       onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
         ) : view === "relatorio" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
             <RelatorioView items={items} alunas={alunas} estoque={estoque} C={C} />
@@ -1435,33 +1459,22 @@ function DayTimeline({ dayList, onOpen }) {
 const DIAS_RETORNO = 21;
 
 function RetornosView({ items, retornos, onMarcar, onDesfazer, onAgendar, onHistory }) {
-  const [dia, setDia] = useState("");   // "" = todas as datas
-
-  // Cada dia com atendimento e uma mentoria. Agrupa por essa data.
-  const datas = useMemo(() => {
-    const m = {};
-    for (const it of items || []) {
-      if (it.status === "cancelado") continue;
-      if (!procsLabel(it)) continue;
-      m[it.date] = (m[it.date] || 0) + 1;
-    }
-    return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0]));   // mais recente primeiro
-  }, [items]);
+  const [esconderFeitos, setEsconderFeitos] = useState(false);
 
   const lista = useMemo(() => {
     return (items || [])
       .filter((it) => it.status !== "cancelado" && procsLabel(it))
-      .filter((it) => (dia ? it.date === dia : true))
       .map((it) => {
         const d = parseKey(it.date); d.setDate(d.getDate() + DIAS_RETORNO);
         const retornoKey = keyOf(d);
         return { it, retornoKey, faltam: -daysSince(retornoKey) };
       })
       .sort((a, b) => a.retornoKey.localeCompare(b.retornoKey) || (a.it.patient || "").localeCompare(b.it.patient || ""));
-  }, [items, dia]);
+  }, [items]);
 
   const chaveDe = (it) => `retorno21|${it.id}`;
   const jaMarcado = (it) => !!(retornos || {})[chaveDe(it)];
+  const visiveis = esconderFeitos ? lista.filter((l) => !jaMarcado(l.it)) : lista;
 
   const rotuloPrazo = (faltam) => {
     if (faltam === 0) return "retorno hoje";
@@ -1469,38 +1482,30 @@ function RetornosView({ items, retornos, onMarcar, onDesfazer, onAgendar, onHist
     return `em ${faltam} dia${faltam > 1 ? "s" : ""}`;
   };
 
-  if (datas.length === 0)
-    return <EmptyBlock icon={RotateCcw} title="Sem retornos ainda" text={`Aqui aparecem os pacientes de cada mentoria, com o retorno de ${DIAS_RETORNO} dias.`} />;
-
-  const chip = (ativo) => ({
-    background: ativo ? C.ink : C.surface, color: ativo ? "#fff" : C.muted,
-    border: `1px solid ${ativo ? C.ink : C.line}`, borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: 500,
-  });
+  if (lista.length === 0)
+    return <EmptyBlock icon={RotateCcw} title="Sem retornos ainda" text={`Aqui aparecem os pacientes da mentoria, com o retorno de ${DIAS_RETORNO} dias.`} />;
 
   return (
     <div className="ag-fade">
       <div className="flex items-center justify-between mb-1">
         <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Retornos</div>
-        <div className="text-sm" style={{ color: C.muted }}>{lista.length} paciente(s)</div>
+        <div className="text-sm" style={{ color: C.muted }}>{visiveis.length} paciente(s)</div>
       </div>
       <div className="text-xs mb-3" style={{ color: C.muted }}>
-        Retorno de {DIAS_RETORNO} dias após o procedimento. Escolha a mentoria para ver só o pessoal daquele dia.
+        Retorno de {DIAS_RETORNO} dias após o procedimento, do mais próximo para o mais distante.
       </div>
 
-      <div className="flex gap-1.5 mb-4 flex-wrap">
-        <button onClick={() => setDia("")} style={chip(dia === "")}>Todas</button>
-        {datas.map(([d, qtd]) => (
-          <button key={d} onClick={() => setDia(d)} style={chip(dia === d)}>
-            {shortDate(d)} · {qtd}
-          </button>
-        ))}
-      </div>
+      <label className="flex items-center gap-2 mb-3 cursor-pointer">
+        <input type="checkbox" checked={esconderFeitos} onChange={() => setEsconderFeitos((v) => !v)}
+               style={{ accentColor: C.coral, width: 16, height: 16 }} />
+        <span className="text-xs" style={{ color: C.muted }}>Esconder os retornos já feitos</span>
+      </label>
 
       <div className="rounded-2xl" style={{ background: C.surface, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        {lista.length === 0 && (
-          <div className="text-center py-10 text-sm" style={{ color: C.muted }}>Nenhum atendimento nesta data.</div>
+        {visiveis.length === 0 && (
+          <div className="text-center py-10 text-sm" style={{ color: C.muted }}>Todos os retornos foram feitos.</div>
         )}
-        {lista.map(({ it, retornoKey, faltam }, i) => {
+        {visiveis.map(({ it, retornoKey, faltam }, i) => {
           const feito = jaMarcado(it);
           const atrasado = faltam < 0 && !feito;
           return (
@@ -1929,7 +1934,15 @@ function UsarControl({ item, onUse }) {
   );
 }
 
-function EstoqueView({ estoque, onAdd, onSet, onDel, onEdit }) {
+function EstoqueView({ estoque, meses, onFecharMes, onAdd, onSet, onDel, onEdit }) {
+  const [aba, setAba] = useState("atual");          // atual | historico
+  const [verMes, setVerMes] = useState("");
+  const [confirmarFechar, setConfirmarFechar] = useState(false);
+  const ymAtual = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; })();
+  const MESES_NOME = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+  const nomeMes = (ym) => { const [y, m] = String(ym).split("-").map(Number);
+    const t = `${MESES_NOME[m - 1]} de ${y}`; return t.charAt(0).toUpperCase() + t.slice(1); };
+  const mesVisto = (meses || []).find((m) => m.ym === verMes) || (meses || [])[0];
   const [nome, setNome] = useState("");
   const [inicial, setInicial] = useState("");
   const [min, setMin] = useState("");
@@ -1948,6 +1961,61 @@ function EstoqueView({ estoque, onAdd, onSet, onDel, onEdit }) {
         <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Estoque</div>
         {baixo > 0 && <div className="text-xs rounded-full px-2.5 py-1 font-medium" style={{ background: C.coralSoft, color: C.coral }}>{baixo} em baixa</div>}
       </div>
+
+      <div className="flex gap-2 mb-4">
+        {[["atual", "Mês atual"], ["historico", `Meses fechados${(meses || []).length ? " · " + meses.length : ""}`]].map(([k, l]) => (
+          <button key={k} onClick={() => setAba(k)} className="text-xs rounded-lg px-3 py-1.5 font-medium"
+                  style={{ background: aba === k ? C.ink : C.surface, color: aba === k ? "#fff" : C.muted,
+                           border: `1px solid ${aba === k ? C.ink : C.line}` }}>{l}</button>
+        ))}
+      </div>
+
+      {aba === "historico" && (
+        <div>
+          {(meses || []).length === 0 ? (
+            <div className="rounded-2xl p-8 text-center text-sm" style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.muted }}>
+              Nenhum mês fechado ainda. Ao fechar um mês, o consumo fica guardado aqui.
+            </div>
+          ) : (
+            <>
+              <div className="flex gap-1.5 flex-wrap mb-3">
+                {meses.map((m) => (
+                  <button key={m.ym} onClick={() => setVerMes(m.ym)} className="text-xs rounded-lg px-3 py-1.5 font-medium"
+                          style={{ background: (mesVisto && mesVisto.ym) === m.ym ? C.coralSoft : C.surface,
+                                   color: (mesVisto && mesVisto.ym) === m.ym ? C.coral : C.muted,
+                                   border: `1px solid ${(mesVisto && mesVisto.ym) === m.ym ? C.coral : C.line}` }}>
+                    {nomeMes(m.ym)}
+                  </button>
+                ))}
+              </div>
+              {mesVisto && (
+                <div className="rounded-2xl" style={{ background: C.surface, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+                  <div className="px-4 py-2 flex text-xs" style={{ background: C.bg, color: C.muted }}>
+                    <span className="flex-1">Produto</span>
+                    <span style={{ width: 54, textAlign: "right" }}>Início</span>
+                    <span style={{ width: 54, textAlign: "right" }}>Usado</span>
+                    <span style={{ width: 54, textAlign: "right" }}>Sobrou</span>
+                  </div>
+                  {mesVisto.itens.map((i, k) => (
+                    <div key={i.nome + k} className="px-4 py-2.5 flex items-center text-sm" style={{ borderTop: `1px solid ${C.line}` }}>
+                      <span className="flex-1 min-w-0 truncate" style={{ color: C.ink }}>{i.nome}</span>
+                      <span style={{ width: 54, textAlign: "right", color: C.muted }}>{i.inicial}</span>
+                      <span style={{ width: 54, textAlign: "right", color: C.ink, fontWeight: 600 }}>{i.usado}</span>
+                      <span style={{ width: 54, textAlign: "right", color: C.muted }}>{i.final}</span>
+                    </div>
+                  ))}
+                  <div className="px-4 py-2 text-xs" style={{ borderTop: `1px solid ${C.line}`, color: C.faint }}>
+                    fechado em {shortDate(mesVisto.fechadoEm)}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {aba === "atual" && (
+      <>
 
       <div className="rounded-2xl p-3 mb-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex gap-2 items-end flex-wrap">
@@ -2006,6 +2074,35 @@ function EstoqueView({ estoque, onAdd, onSet, onDel, onEdit }) {
               </div>
             );
           })}
+        </div>
+      )}
+      </>
+      )}
+
+      {aba === "atual" && (
+        <div className="mt-5">
+          {confirmarFechar ? (
+            <div className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${C.coral}55` }}>
+              <div className="text-sm font-medium mb-1" style={{ color: C.ink }}>Fechar {nomeMes(ymAtual)}?</div>
+              <div className="text-xs mb-3" style={{ color: C.muted }}>
+                O consumo deste mês fica guardado em “Meses fechados” e a contagem recomeça do zero:
+                o que sobrou hoje vira o início do próximo mês. As quantidades em estoque não mudam.
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmarFechar(false)} className="flex-1 text-xs rounded-lg py-2.5 font-medium"
+                        style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>Cancelar</button>
+                <button onClick={() => { onFecharMes(ymAtual); setConfirmarFechar(false); setAba("historico"); }}
+                        className="flex-1 text-xs rounded-lg py-2.5 font-medium" style={{ background: C.ink, color: "#fff" }}>
+                  Fechar o mês
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmarFechar(true)} className="w-full text-xs rounded-xl py-2.5 font-medium"
+                    style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>
+              Fechar {nomeMes(ymAtual)} e recomeçar a contagem
+            </button>
+          )}
         </div>
       )}
     </div>
