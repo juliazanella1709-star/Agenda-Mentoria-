@@ -3,7 +3,7 @@ import {
   Calendar, Plus, Phone, Trash2, Pencil, ChevronLeft, ChevronRight,
   Search, X, Check, CalendarDays, User, Instagram, AlertCircle,
   Users, Wallet, TrendingUp, List, Clock, RotateCcw, PhoneCall, MessageCircle, Package, Minus, Eye, EyeOff, LogOut,
-  FileSpreadsheet, ClipboardList, GraduationCap, FileText,
+  FileSpreadsheet, ClipboardList, GraduationCap, FileText, Menu,
 } from "lucide-react";
 import { auth as fbAuth } from "./firebase";
 import { store } from "./store";
@@ -450,7 +450,8 @@ export default function App() {
   const remove = async (id) => { await persist(items.filter((it) => it.id !== id)); flash("Consulta removida."); };
   const setStatus = async (id, status) => persist(items.map((it) => (it.id === id ? { ...it, status } : it)));
 
-  const goView = (v) => { setView(v); setQuery(""); };
+  const [menuAberto, setMenuAberto] = useState(false);
+  const goView = (v) => { setView(v); setQuery(""); setMenuAberto(false); };
   const openNew = () => setModal({ date: selected, time: "09:00", endTime: "10:00", status: "pendente", valor: "", sinal: "" });
   const openNewFor = (p) => setModal({ date: selected, time: "09:00", endTime: "10:00", status: "pendente", valor: "", sinal: "", patient: p.name, phone: p.phone || "", instagram: p.instagram || "" });
   const verPaciente = (name) => { setQuery(name); setView("agenda"); };
@@ -567,11 +568,16 @@ export default function App() {
     <div className="ff-b min-h-screen w-full" style={{ background: C.bg, color: C.ink }}>
       <header className="ag-noprint" style={{ background: C.ink }}>
         <div className="max-w-5xl mx-auto px-5 py-3 flex items-center gap-3">
-          <div className="leading-none text-white shrink-0">
+          <button onClick={() => setMenuAberto(true)} aria-label="Abrir menu"
+                  className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                  style={{ background: "#3A363F" }}>
+            <Menu size={19} color="#fff" />
+          </button>
+          <button onClick={() => setMenuAberto(true)} className="leading-none text-white shrink-0 text-left hidden sm:block">
             <div className="ff-b" style={{ fontSize: 8, letterSpacing: 3, opacity: 0.6 }}>MENTORIA</div>
             <div className="ff-serif" style={{ fontSize: 19, lineHeight: 1.05 }}>Harmonização Facial</div>
             <div className="ff-b" style={{ fontSize: 7, letterSpacing: 3, opacity: 0.5, marginTop: 1 }}>FULL FACE · IMERSÃO</div>
-          </div>
+          </button>
           {view !== "faturamento" && (
             <div className="flex-1 max-w-xs ml-auto relative">
               <Search size={15} color="#9E98A4" style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }} />
@@ -595,22 +601,46 @@ export default function App() {
         </div>
       </header>
 
-      {/* Menu de navegação */}
-      <div className="ag-noprint" style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
-        <div className="max-w-5xl mx-auto px-3 flex gap-1 overflow-x-auto ag-nav">
-          {TABS.map((t) => {
-            const on = view === t.id; const Icon = t.icon;
-            return (
-              <button key={t.id} onClick={() => goView(t.id)}
-                      className="flex items-center gap-2 px-4 py-3 text-sm whitespace-nowrap"
-                      style={{ color: on ? C.ink : C.muted, fontWeight: on ? 600 : 500,
-                               borderBottom: `2px solid ${on ? C.coral : "transparent"}` }}>
-                <Icon size={16} /> {t.label}
+      {/* Menu lateral: com 11 abas, a barra que rolava de lado era ruim no celular */}
+      {menuAberto && (
+        <div className="ag-noprint" style={{ position: "fixed", inset: 0, zIndex: 60, background: "#26232a66" }}
+             onClick={() => setMenuAberto(false)}>
+          <div className="ag-fade" onClick={(e) => e.stopPropagation()}
+               style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: "min(280px, 82vw)",
+                        background: C.surface, boxShadow: "0 0 40px #0003", display: "flex", flexDirection: "column" }}>
+            <div className="flex items-center justify-between px-4 py-3.5" style={{ background: C.ink }}>
+              <div className="leading-none text-white">
+                <div className="ff-b" style={{ fontSize: 8, letterSpacing: 3, opacity: 0.6 }}>MENTORIA</div>
+                <div className="ff-serif" style={{ fontSize: 17, lineHeight: 1.05 }}>Harmonização Facial</div>
+              </div>
+              <button onClick={() => setMenuAberto(false)} aria-label="Fechar menu"
+                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#3A363F" }}>
+                <X size={16} color="#9E98A4" />
               </button>
-            );
-          })}
+            </div>
+
+            <div className="flex-1 overflow-y-auto ag-scroll py-2">
+              {TABS.map((t) => {
+                const on = view === t.id; const Icon = t.icon;
+                return (
+                  <button key={t.id} onClick={() => goView(t.id)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                          style={{ color: on ? C.ink : C.muted, fontWeight: on ? 600 : 500,
+                                   background: on ? C.tealSoft : "transparent",
+                                   borderLeft: `3px solid ${on ? C.coral : "transparent"}` }}>
+                    <Icon size={17} /> <span className="text-sm">{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button onClick={logout} className="flex items-center gap-2 px-4 py-3.5 text-sm"
+                    style={{ color: C.muted, borderTop: `1px solid ${C.line}` }}>
+              <LogOut size={16} /> Sair
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <main className="max-w-5xl mx-auto px-5 py-6">
         {loading ? (
