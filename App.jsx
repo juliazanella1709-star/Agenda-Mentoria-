@@ -104,12 +104,6 @@ const msgConfirmacao = (it) => {
 // e so o tempo decorrido, que ja basta para a pessoa entender.
 // As duas mensagens de chamar de volta. Ambas citam as datas da proxima
 // mentoria, que ficam num campo editavel (nada chumbado no codigo).
-// Como na confirmacao, nao citam o procedimento.
-const trechoMentoria = (datas) => {
-  const d = (datas || "").trim();
-  return d ? `Teremos uma nova mentoria ${d}.` : "Teremos uma nova mentoria em breve.";
-};
-
 // Convite aberto, para qualquer paciente da lista. Texto definido pela clinica.
 const msgConvite = (nome, datas) => {
   const primeiro = (nome || "").trim().split(/\s+/)[0] || "";
@@ -123,16 +117,20 @@ const msgConvite = (nome, datas) => {
   ].join("\n");
 };
 
-// Retorno, para quem ja fez procedimento. "alguns meses" de proposito: o numero
-// exato soa como cobranca.
-const msgRetorno = (nome, datas) => {
+// Retorno, para quem ja fez procedimento. Texto definido pela clinica.
+// "alguns meses" de proposito: o numero exato soa como cobranca.
+const msgRetorno = (nome, datas, procedimento) => {
   const primeiro = (nome || "").trim().split(/\s+/)[0] || "";
+  const d = (datas || "").trim();
+  const proc = (procedimento || "").trim();
   return [
     `Olá, ${primeiro}! Tudo bem?`,
     "",
-    `Passando para lembrar que já faz alguns meses desde o seu último procedimento. ${trechoMentoria(datas)}`,
+    `Estamos com uma nova mentoria de harmonização facial full face${d ? " " + d : " em breve"}.`,
     "",
-    "Se tiver interesse, me chama aqui que combinamos um horário.",
+    `Gostaria de saber se você tem interesse em agendar a sua nova aplicação${proc ? " de " + proc : ""}, pois já faz alguns meses desde a última.`,
+    "",
+    "Se tiver interesse, me chama aqui para combinarmos um horário.",
   ].join("\n");
 };
 
@@ -288,10 +286,12 @@ function deriveRetornos(items) {
   return Object.values(map);
 }
 
+// Prazo de retorno de cada tipo, em meses. O rotulo do filtro sai daqui, entao
+// mudar o prazo ja arruma a tela junto.
 const RECALL = [
-  { cat: "botox", label: "Botox", dias: 150, re: /botox/ },
-  { cat: "bio", label: "Bioestimulador", dias: 180, re: /bioestimulador|radiesse|diamond/ },
-  { cat: "harmo", label: "Harmonização", dias: 120, re: /combo|harmoniza|protocolo|full face|preenchimento/ },
+  { cat: "botox", label: "Botox", meses: 4, re: /botox/ },
+  { cat: "bio", label: "Bioestimulador", meses: 6, re: /bioestimulador|radiesse|diamond/ },
+  { cat: "harmo", label: "Harmonização", meses: 6, re: /combo|harmoniza|protocolo|full face|preenchimento/ },
 ];
 const chamarLabel = (chamarKey) => {
   const d = daysSince(chamarKey);
@@ -316,12 +316,12 @@ function deriveChamar(items) {
       m.name = it.patient.trim();
       if (it.phone) m.phone = it.phone;
       if (it.instagram) m.instagram = igHandle(it.instagram);
-      if (!m.cats[r.cat] || it.date > m.cats[r.cat].date) m.cats[r.cat] = { date: it.date, label: r.label, dias: r.dias };
+      if (!m.cats[r.cat] || it.date > m.cats[r.cat].date) m.cats[r.cat] = { date: it.date, label: r.label, meses: r.meses };
     }
   }
   return Object.values(map).map((m) => {
     const entries = Object.entries(m.cats).map(([cat, v]) => {
-      const base = parseKey(v.date); const ch = new Date(base); ch.setDate(ch.getDate() + v.dias);
+      const base = parseKey(v.date); const ch = new Date(base); ch.setMonth(ch.getMonth() + v.meses);
       const chamarKey = keyOf(ch);
       return { cat, label: v.label, date: v.date, chamarKey, overdue: daysSince(chamarKey) >= 0 };
     });
@@ -1544,7 +1544,7 @@ function ChamarView({ items, chamadas, mentoriaDatas, onSaveMentoria, onChamar, 
       <BarraMentoria datas={mentoriaDatas} onSave={onSaveMentoria} />
 
       <div className="flex gap-1.5 mb-4 flex-wrap">
-        {[["todos", "Todos"], ["botox", "Botox · 5m"], ["bio", "Bioestimulador · 6m"], ["harmo", "Harmonização · 4m"]].map(([k, l]) => (
+        {[["todos", "Todos"], ...RECALL.map((r) => [r.cat, `${r.label} · ${r.meses}m`])].map(([k, l]) => (
           <button key={k} onClick={() => setFiltro(k)} className="text-xs rounded-full px-3 py-1.5 font-medium"
                   style={{ background: filtro === k ? C.ink : C.surface, color: filtro === k ? "#fff" : C.muted, border: `1px solid ${filtro === k ? C.ink : C.line}` }}>{l}</button>
         ))}
@@ -1566,7 +1566,7 @@ function ChamarView({ items, chamadas, mentoriaDatas, onSaveMentoria, onChamar, 
 
             <div className="space-y-2">
               {grupo.linhas.map(({ m, e, marca }) => {
-                const wa = waLink(m.phone, msgRetorno(m.name, mentoriaDatas));
+                const wa = waLink(m.phone, msgRetorno(m.name, mentoriaDatas, e.label));
                 return (
                   <div key={m.name + e.cat} className="rounded-2xl p-3.5"
                        style={{ background: C.surface, border: `1px solid ${atrasado ? C.coral : C.line}`, opacity: feito ? 0.72 : 1 }}>
