@@ -81,13 +81,23 @@ const waLink = (tel, texto) => {
   if (!n) return null;
   return `https://wa.me/${n}${texto ? "?text=" + encodeURIComponent(texto) : ""}`;
 };
+// Endereco da clinica, usado na confirmacao. Mudou de sala? E so trocar aqui.
+const ENDERECO = ["Rua Gomes Jardim, 301, Santana, Porto Alegre", "Torre Sul", "Sala 913"];
+
 // Mensagem de confirmacao, no texto definido pela clinica. De proposito nao cita
 // o procedimento: o WhatsApp pode ser lido por outra pessoa no aparelho.
 const msgConfirmacao = (it) => {
   const nome = (it.patient || "").trim().split(/\s+/)[0] || "";
   const d = parseKey(it.date);
   const data = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
-  return `Olá, ${nome}! Passando para lembrar: seu procedimento na Mentoria é no dia ${data} (${DIAS_LONGOS[d.getDay()]}), às ${it.time}. Podemos confirmar?`;
+  return [
+    `Olá, ${nome}! Passando para lembrar: seu procedimento na Mentoria é no dia ${data} (${DIAS_LONGOS[d.getDay()]}), às ${it.time}.`,
+    "",
+    `Endereço: ${ENDERECO[0]}`,
+    ...ENDERECO.slice(1),
+    "",
+    "Podemos confirmar?",
+  ].join("\n");
 };
 
 const prettyDate = (k) => { const d = parseKey(k); return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()].toLowerCase()}`; };
