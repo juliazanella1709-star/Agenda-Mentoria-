@@ -252,10 +252,6 @@ function topProcs(items, ym, catalogo) {
 }
 
 const LOGO = "data:image/jpeg;base64,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";
-const catDe = (proc) => {
-  const p = (proc || "").toLowerCase();
-  return { botox: /botox/.test(p), harmo: /(combo|harmoniza|protocolo|full face)/.test(p) };
-};
 const daysSince = (dateStr) => {
   const d = parseKey(dateStr); const today = new Date(); today.setHours(0, 0, 0, 0);
   return Math.floor((today - d) / 86400000);
@@ -267,24 +263,6 @@ const humanAgo = (dateStr) => {
   const meses = Math.round(d / 30);
   return `há ${meses} ${meses > 1 ? "meses" : "mês"}`;
 };
-function deriveRetornos(items) {
-  const map = {};
-  for (const it of items) {
-    if (it.status === "cancelado") continue;
-    const key = (it.patient || "").trim().toLowerCase();
-    if (!key) continue;
-    const c = catDe(procsText(it));
-    if (!c.botox && !c.harmo) continue;
-    if (!map[key]) map[key] = { name: it.patient.trim(), phone: "", instagram: "" };
-    const m = map[key];
-    m.name = it.patient.trim();
-    if (it.phone) m.phone = it.phone;
-    if (it.instagram) m.instagram = igHandle(it.instagram);
-    if (c.botox && (!m.botox || it.date > m.botox.date)) m.botox = { date: it.date, proc: it.procedure };
-    if (c.harmo && (!m.harmo || it.date > m.harmo.date)) m.harmo = { date: it.date, proc: it.procedure };
-  }
-  return Object.values(map);
-}
 
 // Prazo de retorno de cada tipo, em meses. O rotulo do filtro sai daqui, entao
 // mudar o prazo ja arruma a tela junto.
@@ -773,7 +751,8 @@ export default function App() {
           <PatientsView items={items} people={people} query={query} onAgendar={openNewFor} onHistory={openHistory}
                         mentoriaDatas={mentoriaDatas} onSaveMentoria={persistMentoria} onCadastrar={() => setPatientForm({})} />
         ) : view === "retornos" ? (
-          <RetornosView items={items} onAgendar={openNewFor} onHistory={openHistory} />
+          <RetornosView items={items} retornos={chamadas} onMarcar={marcarChamado}
+                        onDesfazer={desfazerChamado} onAgendar={openNewFor} onHistory={openHistory} />
         ) : view === "chamar" ? (
           <ChamarView items={items} chamadas={chamadas} mentoriaDatas={mentoriaDatas}
                      onSaveMentoria={persistMentoria} onChamar={marcarChamado}
@@ -1451,74 +1430,106 @@ function DayTimeline({ dayList, onOpen }) {
 }
 
 // ---- Retornos (botox e combos de harmonização) -----------------------------
-function RetornosView({ items, onAgendar, onHistory }) {
-  const [filtro, setFiltro] = useState("todos");
-  const pacientes = useMemo(() => deriveRetornos(items), [items]);
-  const list = pacientes.filter((p) => (filtro === "todos" ? (p.botox || p.harmo) : filtro === "botox" ? p.botox : p.harmo));
-  const relDate = (p) => {
-    if (filtro === "botox") return p.botox && p.botox.date;
-    if (filtro === "harmo") return p.harmo && p.harmo.date;
-    const ds = [p.botox && p.botox.date, p.harmo && p.harmo.date].filter(Boolean).sort();
-    return ds[ds.length - 1];
-  };
-  list.sort((a, b) => (relDate(a) || "").localeCompare(relDate(b) || ""));
+// Retorno pos-procedimento: 21 dias depois da mentoria. Diferente do "Chamar
+// de volta", que e a renovacao em 4/6/6 meses.
+const DIAS_RETORNO = 21;
 
-  if (pacientes.length === 0)
-    return <EmptyBlock icon={RotateCcw} title="Sem retornos ainda" text="Aqui aparecem os pacientes que fizeram botox ou combos de harmonização, para você agendar o retorno." />;
+function RetornosView({ items, retornos, onMarcar, onDesfazer, onAgendar, onHistory }) {
+  const [dia, setDia] = useState("");   // "" = todas as datas
+
+  // Cada dia com atendimento e uma mentoria. Agrupa por essa data.
+  const datas = useMemo(() => {
+    const m = {};
+    for (const it of items || []) {
+      if (it.status === "cancelado") continue;
+      if (!procsLabel(it)) continue;
+      m[it.date] = (m[it.date] || 0) + 1;
+    }
+    return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0]));   // mais recente primeiro
+  }, [items]);
+
+  const lista = useMemo(() => {
+    return (items || [])
+      .filter((it) => it.status !== "cancelado" && procsLabel(it))
+      .filter((it) => (dia ? it.date === dia : true))
+      .map((it) => {
+        const d = parseKey(it.date); d.setDate(d.getDate() + DIAS_RETORNO);
+        const retornoKey = keyOf(d);
+        return { it, retornoKey, faltam: -daysSince(retornoKey) };
+      })
+      .sort((a, b) => a.retornoKey.localeCompare(b.retornoKey) || (a.it.patient || "").localeCompare(b.it.patient || ""));
+  }, [items, dia]);
+
+  const chaveDe = (it) => `retorno21|${it.id}`;
+  const jaMarcado = (it) => !!(retornos || {})[chaveDe(it)];
+
+  const rotuloPrazo = (faltam) => {
+    if (faltam === 0) return "retorno hoje";
+    if (faltam < 0) return `passou ${-faltam} dia${faltam < -1 ? "s" : ""}`;
+    return `em ${faltam} dia${faltam > 1 ? "s" : ""}`;
+  };
+
+  if (datas.length === 0)
+    return <EmptyBlock icon={RotateCcw} title="Sem retornos ainda" text={`Aqui aparecem os pacientes de cada mentoria, com o retorno de ${DIAS_RETORNO} dias.`} />;
+
+  const chip = (ativo) => ({
+    background: ativo ? C.ink : C.surface, color: ativo ? "#fff" : C.muted,
+    border: `1px solid ${ativo ? C.ink : C.line}`, borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: 500,
+  });
 
   return (
     <div className="ag-fade">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-1">
         <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Retornos</div>
-        <div className="text-sm" style={{ color: C.muted }}>{list.length} paciente(s)</div>
+        <div className="text-sm" style={{ color: C.muted }}>{lista.length} paciente(s)</div>
       </div>
-      <div className="flex gap-1.5 mb-4">
-        {[["todos", "Todos"], ["botox", "Botox"], ["harmo", "Harmonização"]].map(([k, l]) => (
-          <button key={k} onClick={() => setFiltro(k)} className="text-xs rounded-full px-3 py-1.5 font-medium"
-                  style={{ background: filtro === k ? C.ink : C.surface, color: filtro === k ? "#fff" : C.muted, border: `1px solid ${filtro === k ? C.ink : C.line}` }}>{l}</button>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>
+        Retorno de {DIAS_RETORNO} dias após o procedimento. Escolha a mentoria para ver só o pessoal daquele dia.
+      </div>
+
+      <div className="flex gap-1.5 mb-4 flex-wrap">
+        <button onClick={() => setDia("")} style={chip(dia === "")}>Todas</button>
+        {datas.map(([d, qtd]) => (
+          <button key={d} onClick={() => setDia(d)} style={chip(dia === d)}>
+            {shortDate(d)} · {qtd}
+          </button>
         ))}
       </div>
-      <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))" }}>
-        {list.map((p) => {
-          const showBotox = (filtro === "todos" || filtro === "botox") && p.botox;
-          const showHarmo = (filtro === "todos" || filtro === "harmo") && p.harmo;
-          const dueBotox = p.botox && daysSince(p.botox.date) >= 120;
-          const dueHarmo = p.harmo && daysSince(p.harmo.date) >= 180;
-          const due = (showBotox && dueBotox) || (showHarmo && dueHarmo);
+
+      <div className="rounded-2xl" style={{ background: C.surface, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+        {lista.length === 0 && (
+          <div className="text-center py-10 text-sm" style={{ color: C.muted }}>Nenhum atendimento nesta data.</div>
+        )}
+        {lista.map(({ it, retornoKey, faltam }, i) => {
+          const feito = jaMarcado(it);
+          const atrasado = faltam < 0 && !feito;
           return (
-            <div key={p.name} className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${due ? C.coral : C.line}` }}>
-              <button onClick={() => onHistory(p.name)} className="flex items-center gap-3 w-full text-left">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 ff-d text-sm"
-                     style={{ background: C.tealSoft, color: C.teal, fontWeight: 700 }}>{initials(p.name)}</div>
-                <div className="min-w-0">
-                  <div className="font-semibold truncate" style={{ color: C.ink }}>{p.name}</div>
+            <div key={it.id} className="px-3.5 py-3" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.line}`, opacity: feito ? 0.6 : 1 }}>
+              <div className="flex items-start gap-3">
+                <button onClick={() => onHistory(it.patient)} className="flex-1 min-w-0 text-left">
+                  <div className="text-sm font-medium truncate" style={{ color: C.ink }}>{it.patient}</div>
                   <div className="text-xs truncate" style={{ color: C.muted }}>
-                    {p.instagram ? "@" + p.instagram : ""}{p.instagram && p.phone ? " · " : ""}{p.phone || ""}{!p.instagram && !p.phone ? "sem contato" : ""}
+                    {procsLabel(it)} · mentoria {shortDate(it.date)}
+                  </div>
+                </button>
+                <div className="text-right shrink-0">
+                  <div className="ff-d text-sm" style={{ fontWeight: 700, color: atrasado ? C.coral : C.ink }}>{shortDate(retornoKey)}</div>
+                  <div className="text-xs" style={{ color: feito ? C.goodFg : atrasado ? C.coral : C.muted }}>
+                    {feito ? "retorno feito" : rotuloPrazo(faltam)}
                   </div>
                 </div>
-              </button>
-              <div className="mt-3 space-y-1.5">
-                {showBotox && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span style={{ color: C.ink }}>Botox</span>
-                    <span style={{ color: dueBotox ? C.coral : C.muted, fontWeight: dueBotox ? 600 : 400 }}>{humanAgo(p.botox.date)} · {shortDate(p.botox.date)}</span>
-                  </div>
-                )}
-                {showHarmo && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span style={{ color: C.ink }}>Harmonização</span>
-                    <span style={{ color: dueHarmo ? C.coral : C.muted, fontWeight: dueHarmo ? 600 : 400 }}>{humanAgo(p.harmo.date)} · {shortDate(p.harmo.date)}</span>
-                  </div>
-                )}
               </div>
-              {due && (
-                <div className="text-xs mt-2 rounded-md px-2 py-1 inline-flex items-center gap-1" style={{ background: C.coralSoft, color: C.coral }}>
-                  <RotateCcw size={11} /> retorno recomendado
-                </div>
-              )}
-              <button onClick={() => onAgendar(p)} className="w-full text-xs rounded-lg py-2 font-medium mt-3" style={{ background: C.ink, color: "#fff" }}>
-                Agendar retorno
-              </button>
+              <div className="flex gap-1.5 mt-2.5">
+                <button onClick={() => onAgendar({ name: it.patient, phone: it.phone, instagram: it.instagram })}
+                        className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>
+                  Agendar retorno
+                </button>
+                <button onClick={() => (feito ? onDesfazer(chaveDe(it)) : onMarcar(chaveDe(it), it.date))}
+                        className="flex-1 text-xs rounded-lg py-2 font-medium"
+                        style={{ background: feito ? C.bg : C.tealSoft, color: feito ? C.muted : C.teal, border: `1px solid ${C.line}` }}>
+                  {feito ? "Desfazer" : "Retorno feito"}
+                </button>
+              </div>
             </div>
           );
         })}
