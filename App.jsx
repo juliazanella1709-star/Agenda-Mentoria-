@@ -102,17 +102,36 @@ const msgConfirmacao = (it) => {
 
 // Mensagem do "chamar de volta". Como na confirmacao, nao cita o procedimento:
 // e so o tempo decorrido, que ja basta para a pessoa entender.
-const msgRetorno = (nome, dataUltima, jaVenceu) => {
+// As duas mensagens de chamar de volta. Ambas citam as datas da proxima
+// mentoria, que ficam num campo editavel (nada chumbado no codigo).
+// Como na confirmacao, nao citam o procedimento.
+const trechoMentoria = (datas) => {
+  const d = (datas || "").trim();
+  return d ? `Teremos uma nova mentoria ${d}.` : "Teremos uma nova mentoria em breve.";
+};
+
+// Convite aberto, para qualquer paciente da lista.
+const msgConvite = (nome, datas) => {
   const primeiro = (nome || "").trim().split(/\s+/)[0] || "";
-  const tempo = humanAgo(dataUltima).replace(/^há /, "");
-  // quem ja passou do prazo nao pode ouvir "esta chegando a epoca"
-  const epoca = jaVenceu ? "e já está na época de renovar" : "e está chegando a época de renovar";
   return [
     `Olá, ${primeiro}! Tudo bem?`,
     "",
-    `Já faz ${tempo} do seu último procedimento aqui na Mentoria, ${epoca}.`,
+    trechoMentoria(datas),
     "",
-    "Quer que eu veja um horário para você?",
+    "Gostaria de agendar algum procedimento ou saber mais informações?",
+  ].join("\n");
+};
+
+// Retorno, para quem ja fez procedimento. "alguns meses" de proposito: o numero
+// exato soa como cobranca.
+const msgRetorno = (nome, datas) => {
+  const primeiro = (nome || "").trim().split(/\s+/)[0] || "";
+  return [
+    `Olá, ${primeiro}! Tudo bem?`,
+    "",
+    `Passando para lembrar que já faz alguns meses desde o seu último procedimento. ${trechoMentoria(datas)}`,
+    "",
+    "Se tiver interesse, me chama aqui que combinamos um horário.",
   ].join("\n");
 };
 
@@ -317,6 +336,7 @@ const PEOPLE_KEY = "agenda:pacientes:v1";
 const STOCK_KEY = "agenda:estoque:v1";
 const PROCS_KEY = "agenda:procedimentos:v1";
 const CHAMADAS_KEY = "agenda:chamadas:v1";
+const MENTORIA_KEY = "agenda:mentoria:v1";
 const ALUNAS_KEY = "agenda:alunas:v1";
 const CURSO_KEY = "agenda:curso:v1";
 // Valores padrao do curso; ficam editaveis na propria aba.
@@ -345,6 +365,7 @@ export default function App() {
   const [procs, setProcs] = useState(PROCS_PADRAO);
   // { "nome|categoria": { em: "AAAA-MM-DD", ref: data da consulta que gerou o prazo } }
   const [chamadas, setChamadas] = useState({});
+  const [mentoriaDatas, setMentoriaDatas] = useState(""); // ex: "nos dias 12 e 13 de novembro"
   const [alunas, setAlunas] = useState([]);
   const [curso, setCurso] = useState(CURSO_PADRAO);
   const [auth, setAuth] = useState(null);
@@ -390,9 +411,9 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e, pr, ch, al, cu] = await Promise.all([
+      const [c, n, p, e, pr, ch, al, cu, mt] = await Promise.all([
         ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY), ler(CHAMADAS_KEY),
-        ler(ALUNAS_KEY), ler(CURSO_KEY),
+        ler(ALUNAS_KEY), ler(CURSO_KEY), ler(MENTORIA_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
@@ -403,6 +424,7 @@ export default function App() {
       const vch = parse(ch); if (vch) setChamadas(vch);
       const val = parse(al); if (val) setAlunas(val);
       const vcu = parse(cu); if (vcu) setCurso({ ...CURSO_PADRAO, ...vcu });
+      const vmt = parse(mt); if (vmt && typeof vmt.datas === "string") setMentoriaDatas(vmt.datas);
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -450,6 +472,7 @@ export default function App() {
     try { await store.set(STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
     flash(`${ids.length} ${ids.length === 1 ? "consulta corrigida" : "consultas corrigidas"}.`);
   };
+  const persistMentoria = async (datas) => { setMentoriaDatas(datas); try { await store.set(MENTORIA_KEY, JSON.stringify({ datas })); } catch (_) {} };
   const persistAlunas = async (next) => { setAlunas(next); try { await store.set(ALUNAS_KEY, JSON.stringify(next)); } catch (_) {} };
   const persistCurso = async (next) => { setCurso(next); try { await store.set(CURSO_KEY, JSON.stringify(next)); } catch (_) {} };
   const persistChamadas = async (next) => { setChamadas(next); try { await store.set(CHAMADAS_KEY, JSON.stringify(next)); } catch (_) {} };
@@ -716,11 +739,13 @@ export default function App() {
             </div>
           )
         ) : view === "pacientes" ? (
-          <PatientsView items={items} people={people} query={query} onAgendar={openNewFor} onHistory={openHistory} onCadastrar={() => setPatientForm({})} />
+          <PatientsView items={items} people={people} query={query} onAgendar={openNewFor} onHistory={openHistory}
+                        mentoriaDatas={mentoriaDatas} onSaveMentoria={persistMentoria} onCadastrar={() => setPatientForm({})} />
         ) : view === "retornos" ? (
           <RetornosView items={items} onAgendar={openNewFor} onHistory={openHistory} />
         ) : view === "chamar" ? (
-          <ChamarView items={items} chamadas={chamadas} onChamar={marcarChamado}
+          <ChamarView items={items} chamadas={chamadas} mentoriaDatas={mentoriaDatas}
+                     onSaveMentoria={persistMentoria} onChamar={marcarChamado}
                      onDesfazer={desfazerChamado} onAgendar={openNewFor} onHistory={openHistory} />
         ) : view === "pagamentos" ? (
           <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
@@ -949,7 +974,50 @@ function SearchView({ results, onPick, onOpen }) {
 }
 
 // ---- Pacientes -------------------------------------------------------------
-function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar }) {
+// Barra das datas da proxima mentoria. Mesma coisa nas abas Pacientes e Chamar,
+// editando o mesmo valor guardado.
+function BarraMentoria({ datas, onSave }) {
+  const [editando, setEditando] = useState(false);
+  const [v, setV] = useState(datas || "");
+  useEffect(() => { setV(datas || ""); }, [datas]);
+  const salvar = () => { onSave((v || "").trim()); setEditando(false); };
+
+  if (!editando) {
+    return (
+      <button onClick={() => setEditando(true)}
+              className="w-full text-left rounded-xl px-3 py-2.5 mb-3 flex items-center gap-2"
+              style={{ background: datas ? C.tealSoft : C.coralSoft, border: `1px solid ${C.line}` }}>
+        <CalendarDays size={14} className="shrink-0" style={{ color: datas ? C.teal : C.coral }} />
+        <span className="text-xs flex-1 min-w-0" style={{ color: datas ? C.teal : C.coral }}>
+          {datas ? <>Próxima mentoria: <b>{datas}</b></> : "Informe as datas da próxima mentoria — elas entram nas mensagens"}
+        </span>
+        <Pencil size={12} className="shrink-0" style={{ color: C.muted }} />
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+      <div className="text-xs mb-1" style={{ color: C.muted }}>
+        Datas da próxima mentoria — escreva como quer que apareça na mensagem
+      </div>
+      <input value={v} onChange={(e) => setV(e.target.value)} autoFocus
+             placeholder="nos dias 12 e 13 de novembro"
+             onKeyDown={(e) => { if (e.key === "Enter") salvar(); if (e.key === "Escape") setEditando(false); }}
+             style={{ width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink }} />
+      <div className="text-xs mt-1.5" style={{ color: C.faint }}>
+        Vai aparecer assim: “Teremos uma nova mentoria {(v || "").trim() || "…"}.”
+      </div>
+      <div className="flex gap-2 mt-2.5">
+        <button onClick={() => setEditando(false)} className="flex-1 text-xs rounded-lg py-2 font-medium"
+                style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>Cancelar</button>
+        <button onClick={salvar} className="flex-1 text-xs rounded-lg py-2 font-medium"
+                style={{ background: C.ink, color: "#fff" }}>Salvar</button>
+      </div>
+    </div>
+  );
+}
+
+function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar, mentoriaDatas, onSaveMentoria }) {
   const patients = useMemo(() => derivePatients(items, people), [items, people]);
   const q = query.trim().toLowerCase();
   const list = q ? patients.filter((p) => p.name.toLowerCase().includes(q) || (p.phone || "").includes(q) || (p.instagram || "").toLowerCase().includes(q)) : patients;
@@ -972,6 +1040,8 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar 
           </button>
         </div>
       </div>
+      <BarraMentoria datas={mentoriaDatas} onSave={onSaveMentoria} />
+
       <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))" }}>
         {list.map((p) => (
           <div key={p.name} className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
@@ -1000,6 +1070,13 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar 
               <button onClick={() => onHistory(p.name)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.tealSoft, color: C.teal }}>Histórico</button>
               <button onClick={() => onAgendar(p)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Agendar</button>
             </div>
+            {p.phone && (
+              <a href={waLink(p.phone, msgConvite(p.name, mentoriaDatas))} target="_blank" rel="noreferrer"
+                 className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium flex items-center justify-center gap-1.5"
+                 style={{ background: C.goodBg, color: C.goodFg }}>
+                <MessageCircle size={13} /> Convidar para a mentoria
+              </a>
+            )}
           </div>
         ))}
       </div>
@@ -1420,7 +1497,7 @@ function RetornosView({ items, onAgendar, onHistory }) {
 }
 
 // ---- Chamar de volta (recontato por tempo) ---------------------------------
-function ChamarView({ items, chamadas, onChamar, onDesfazer, onHistory, onAgendar }) {
+function ChamarView({ items, chamadas, mentoriaDatas, onSaveMentoria, onChamar, onDesfazer, onHistory, onAgendar }) {
   const [filtro, setFiltro] = useState("todos");
   const chaveDe = (nome, cat) => `${normNome(nome)}|${cat}`;
   // A marca so vale para a consulta que gerou o prazo (ref). Procedimento novo
@@ -1463,6 +1540,8 @@ function ChamarView({ items, chamadas, onChamar, onDesfazer, onHistory, onAgenda
         <div className="ff-d text-xl" style={{ fontWeight: 600 }}>Chamar de volta</div>
         <div className="text-sm" style={{ color: C.muted }}>{filt.length} paciente(s)</div>
       </div>
+      <BarraMentoria datas={mentoriaDatas} onSave={onSaveMentoria} />
+
       <div className="flex gap-1.5 mb-4 flex-wrap">
         {[["todos", "Todos"], ["botox", "Botox · 5m"], ["bio", "Bioestimulador · 6m"], ["harmo", "Harmonização · 4m"]].map(([k, l]) => (
           <button key={k} onClick={() => setFiltro(k)} className="text-xs rounded-full px-3 py-1.5 font-medium"
@@ -1486,7 +1565,7 @@ function ChamarView({ items, chamadas, onChamar, onDesfazer, onHistory, onAgenda
 
             <div className="space-y-2">
               {grupo.linhas.map(({ m, e, marca }) => {
-                const wa = waLink(m.phone, msgRetorno(m.name, e.date, e.overdue));
+                const wa = waLink(m.phone, msgRetorno(m.name, mentoriaDatas));
                 return (
                   <div key={m.name + e.cat} className="rounded-2xl p-3.5"
                        style={{ background: C.surface, border: `1px solid ${atrasado ? C.coral : C.line}`, opacity: feito ? 0.72 : 1 }}>
