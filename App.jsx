@@ -68,6 +68,28 @@ const pad = (n) => String(n).padStart(2, "0");
 const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const todayKey = () => keyOf(new Date());
 const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const DIAS_LONGOS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+
+// Numero no formato do WhatsApp: so digitos, com 55 na frente quando nao veio.
+const waNumero = (tel) => {
+  const d = (tel || "").replace(/\D/g, "");
+  if (!d) return "";
+  return d.startsWith("55") && d.length > 11 ? d : "55" + d;
+};
+const waLink = (tel, texto) => {
+  const n = waNumero(tel);
+  if (!n) return null;
+  return `https://wa.me/${n}${texto ? "?text=" + encodeURIComponent(texto) : ""}`;
+};
+// Mensagem de confirmacao, no texto definido pela clinica. De proposito nao cita
+// o procedimento: o WhatsApp pode ser lido por outra pessoa no aparelho.
+const msgConfirmacao = (it) => {
+  const nome = (it.patient || "").trim().split(/\s+/)[0] || "";
+  const d = parseKey(it.date);
+  const data = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+  return `Olá, ${nome}! Passando para lembrar: seu procedimento na Mentoria é no dia ${data} (${DIAS_LONGOS[d.getDay()]}), às ${it.time}. Podemos confirmar?`;
+};
+
 const prettyDate = (k) => { const d = parseKey(k); return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()].toLowerCase()}`; };
 const shortDate = (k) => { const d = parseKey(k); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
 const ymOf = (k) => k.slice(0, 7);
@@ -835,7 +857,14 @@ function Card({ it, onEdit, onDelete, onStatus }) {
 
         {it.notes && <div className="text-xs mt-2 rounded-lg px-2.5 py-1.5" style={{ background: C.bg, color: C.muted }}>{it.notes}</div>}
 
-        <div className="flex items-center gap-1 mt-2.5">
+        <div className="flex items-center gap-1 mt-2.5 flex-wrap">
+          {it.phone && it.status !== "cancelado" && (
+            <a href={waLink(it.phone, msgConfirmacao(it))} target="_blank" rel="noreferrer"
+               className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 font-medium"
+               style={{ background: C.goodBg, color: C.goodFg }}>
+              <MessageCircle size={12} /> Confirmar
+            </a>
+          )}
           <button onClick={onEdit} className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 font-medium"
                   style={{ background: C.tealSoft, color: C.teal }}>
             <Pencil size={12} /> Editar
@@ -2013,7 +2042,17 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
       <div className="ag-pop ag-scroll ff-b" onClick={(e) => e.stopPropagation()}
            style={{ background: C.surface, width: "100%", maxWidth: 520, maxHeight: "92vh", overflowY: "auto", borderRadius: 18, padding: 20 }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="ff-d text-lg" style={{ fontWeight: 600, color: C.ink }}>{f.id ? "Editar consulta" : "Nova consulta"}</div>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="ff-d text-lg" style={{ fontWeight: 600, color: C.ink }}>{f.id ? "Editar consulta" : "Nova consulta"}</div>
+            {f.phone && f.date && f.time && f.status !== "cancelado" && (
+              <a href={waLink(f.phone, msgConfirmacao(f))} target="_blank" rel="noreferrer"
+                 title="Abrir o WhatsApp com a mensagem de confirmação pronta"
+                 className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 font-medium shrink-0"
+                 style={{ background: C.goodBg, color: C.goodFg }}>
+                <MessageCircle size={13} /> Confirmar
+              </a>
+            )}
+          </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.bg }}>
             <X size={17} color={C.ink} />
           </button>
