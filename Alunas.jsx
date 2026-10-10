@@ -37,29 +37,25 @@ const pagoCursoDe = (a) => (a.pagamentos || []).reduce((s, p) => s + toNum(p.val
 const pagoDe = (a, curso) => (a.matriculaPaga ? matriculaDe(a, curso) : 0) + pagoCursoDe(a);
 const saldoDe = (a, curso) => Math.max(totalDe(a, curso) - pagoDe(a, curso), 0);
 
-export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C }) {
-  const [tela, setTela] = useState("lista");   // lista | valores
-  const [aberta, setAberta] = useState(null);  // id da aluna aberta
+export default function AlunasView({
+  alunas, turmas, curso, onSaveAlunas, onSaveTurmas, onCriarTurmaCom, onSaveCurso, C,
+}) {
+  const [tela, setTela] = useState("turmas");   // turmas | valores
+  const [turmaAberta, setTurmaAberta] = useState(null);
+  const [aberta, setAberta] = useState(null);   // id da aluna aberta
   const [form, setForm] = useState(null);
   const [apagar, setApagar] = useState(null);
-  const [filtroMes, setFiltroMes] = useState("todas");
+  const [novaTurma, setNovaTurma] = useState(null);   // { id?, nome }
+  const [apagarTurma, setApagarTurma] = useState(null);
 
-  // meses de mentoria que tem aluna, do mais recente para o mais antigo
-  const mesesMentoria = useMemo(() => {
-    const set = new Set();
-    for (const a of alunas || []) set.add(a.mentoria || "");
-    return [...set].sort().reverse();
-  }, [alunas]);
-  const visiveis = useMemo(
-    () => (alunas || []).filter((a) => (filtroMes === "todas" ? true : (a.mentoria || "") === filtroMes)),
-    [alunas, filtroMes]
-  );
+  const semTurma = useMemo(() => (alunas || []).filter((a) => !a.turmaId), [alunas]);
+  const daTurma = (tid) => (alunas || []).filter((a) => a.turmaId === tid);
 
-  const totais = useMemo(() => {
-    const previsto = visiveis.reduce((s, a) => s + totalDe(a, curso), 0);
-    const recebido = visiveis.reduce((s, a) => s + pagoDe(a, curso), 0);
+  const somaDe = (lista) => {
+    const previsto = lista.reduce((s, a) => s + totalDe(a, curso), 0);
+    const recebido = lista.reduce((s, a) => s + pagoDe(a, curso), 0);
     return { previsto, recebido, aReceber: Math.max(previsto - recebido, 0) };
-  }, [visiveis, curso]);
+  };
 
   const card = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16 };
   const input = { background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink, width: "100%" };
@@ -69,7 +65,7 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
     if (!nome) return;
     const base = {
       nome, telefone: form.telefone || "", modalidade: form.modalidade || "parcelado", obs: form.obs || "",
-      mentoria: form.mentoria || "",
+      turmaId: form.turmaId || turmaAberta || "",
       matriculaPaga: !!form.matriculaPaga, matriculaData: form.matriculaData || "",
       valorMatricula: form.valorMatricula === "" ? "" : toNum(form.valorMatricula),
       valorCurso: form.valorCurso === "" ? "" : toNum(form.valorCurso),
@@ -82,10 +78,22 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
     setForm(null);
   };
 
+  const salvarTurma = () => {
+    const nome = (novaTurma.nome || "").trim();
+    if (!nome) return;
+    if (novaTurma.id) {
+      onSaveTurmas((turmas || []).map((t) => (t.id === novaTurma.id ? { ...t, nome } : t)));
+    } else {
+      onCriarTurmaCom(nome, []);
+    }
+    setNovaTurma(null);
+  };
+
   const alunaAberta = (alunas || []).find((a) => a.id === aberta);
+  const turma = (turmas || []).find((t) => t.id === turmaAberta);
 
   if (tela === "valores") {
-    return <Valores curso={curso} onSave={onSaveCurso} onVoltar={() => setTela("lista")} C={C} card={card} input={input} />;
+    return <Valores curso={curso} onSave={onSaveCurso} onVoltar={() => setTela("turmas")} C={C} card={card} input={input} />;
   }
 
   if (alunaAberta) {
@@ -94,6 +102,55 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
                     onSave={(next) => onSaveAlunas((alunas || []).map((a) => (a.id === next.id ? next : a)))} />;
   }
 
+  // ------------------------------------------------------ dentro de uma turma
+  if (turma) {
+    const lista = daTurma(turma.id);
+    const t = somaDe(lista);
+    return (
+      <div className="ag-fade">
+        <button onClick={() => setTurmaAberta(null)} className="flex items-center gap-1 text-sm mb-3" style={{ color: C.muted }}>
+          <ChevronLeft size={16} /> Turmas
+        </button>
+
+        <div className="flex items-center justify-between mb-3">
+          <div className="ff-d text-xl" style={{ fontWeight: 600 }}>{turma.nome}</div>
+          <div className="text-sm" style={{ color: C.muted }}>{lista.length} aluna(s)</div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <Mini label="Previsto" value={brl(t.previsto)} C={C} />
+          <Mini label="Recebido" value={brl(t.recebido)} C={C} cor={C.goodFg} />
+          <Mini label="A receber" value={brl(t.aReceber)} C={C} cor={t.aReceber > 0 ? C.coral : C.muted} />
+        </div>
+
+        <button onClick={() => setForm({ nome: "", telefone: "", modalidade: "parcelado", obs: "", turmaId: turma.id,
+                                         matriculaPaga: false, matriculaData: "", valorMatricula: "", valorCurso: "", parcelas: "" })}
+                className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
+                style={{ background: C.ink, color: "#fff" }}>
+          <Plus size={17} /> Nova aluna nesta turma
+        </button>
+
+        {lista.length === 0 && (
+          <div className="text-center py-12 text-sm rounded-2xl" style={{ ...card, color: C.muted }}>
+            Nenhuma aluna nesta turma ainda.
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {lista.map((a) => <CartaoAluna key={a.id} a={a} curso={curso} C={C} card={card}
+                                         onAbrir={() => setAberta(a.id)} onEditar={() => setForm({ ...a })}
+                                         onApagar={() => setApagar(a)} />)}
+        </div>
+
+        {form && <FormAluna form={form} setForm={setForm} salvar={salvarAluna} curso={curso} C={C} input={input} />}
+        {apagar && <ConfirmaApagar aluna={apagar} onCancelar={() => setApagar(null)} C={C}
+                                   onConfirmar={() => { onSaveAlunas((alunas || []).filter((x) => x.id !== apagar.id)); setApagar(null); }} />}
+      </div>
+    );
+  }
+
+  // --------------------------------------------------------- lista de turmas
+  const geral = somaDe(alunas || []);
   return (
     <div className="ag-fade">
       <div className="flex items-center justify-between mb-3">
@@ -104,180 +161,251 @@ export default function AlunasView({ alunas, curso, onSaveAlunas, onSaveCurso, C
         </button>
       </div>
 
-      {mesesMentoria.length > 1 && (
-        <div className="flex gap-1.5 flex-wrap mb-3">
-          <button onClick={() => setFiltroMes("todas")} className="text-xs rounded-lg px-3 py-1.5 font-medium"
-                  style={{ background: filtroMes === "todas" ? C.ink : C.surface, color: filtroMes === "todas" ? "#fff" : C.muted,
-                           border: `1px solid ${filtroMes === "todas" ? C.ink : C.line}` }}>Todas</button>
-          {mesesMentoria.map((ym) => (
-            <button key={ym} onClick={() => setFiltroMes(ym)} className="text-xs rounded-lg px-3 py-1.5 font-medium"
-                    style={{ background: filtroMes === ym ? C.ink : C.surface, color: filtroMes === ym ? "#fff" : C.muted,
-                             border: `1px solid ${filtroMes === ym ? C.ink : C.line}` }}>{nomeMes(ym)}</button>
-          ))}
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <Mini label="Previsto" value={brl(geral.previsto)} C={C} />
+        <Mini label="Recebido" value={brl(geral.recebido)} C={C} cor={C.goodFg} />
+        <Mini label="A receber" value={brl(geral.aReceber)} C={C} cor={geral.aReceber > 0 ? C.coral : C.muted} />
+      </div>
+
+      <button onClick={() => setNovaTurma({ nome: "" })}
+              className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
+              style={{ background: C.ink, color: "#fff" }}>
+        <Plus size={17} /> Nova turma
+      </button>
+
+      {/* alunas que ainda nao estao em turma nenhuma */}
+      {semTurma.length > 0 && (
+        <div className="rounded-2xl p-3.5 mb-4" style={{ background: C.coralSoft, border: `1px solid ${C.coral}33` }}>
+          <div className="text-sm font-medium" style={{ color: C.coral }}>
+            {semTurma.length} {semTurma.length === 1 ? "aluna está" : "alunas estão"} sem turma
+          </div>
+          <div className="text-xs mt-1 mb-2.5" style={{ color: C.muted }}>
+            São as que já estavam cadastradas antes das turmas existirem.
+          </div>
+          <button onClick={() => onCriarTurmaCom("Agosto de 2026", semTurma.map((a) => a.id))}
+                  className="text-xs rounded-lg px-3 py-2 font-medium" style={{ background: C.coral, color: "#fff" }}>
+            Criar “Agosto de 2026” com {semTurma.length === 1 ? "ela" : "elas"}
+          </button>
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <Mini label="Previsto" value={brl(totais.previsto)} C={C} />
-        <Mini label="Recebido" value={brl(totais.recebido)} C={C} cor={C.goodFg} />
-        <Mini label="A receber" value={brl(totais.aReceber)} C={C} cor={totais.aReceber > 0 ? C.coral : C.muted} />
-      </div>
-
-      <button onClick={() => setForm({ nome: "", telefone: "", modalidade: "parcelado", obs: "", mentoria: mesAtual(),
-                                       matriculaPaga: false, matriculaData: "", valorMatricula: "", valorCurso: "", parcelas: "" })}
-              className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
-              style={{ background: C.ink, color: "#fff" }}>
-        <Plus size={17} /> Nova aluna
-      </button>
-
-      {visiveis.length === 0 && (
+      {(turmas || []).length === 0 && semTurma.length === 0 && (
         <div className="text-center py-12 text-sm rounded-2xl" style={{ ...card, color: C.muted }}>
-          Nenhuma aluna cadastrada ainda.
+          Nenhuma turma ainda. Crie a primeira e cadastre as alunas dentro dela.
         </div>
       )}
 
       <div className="space-y-2">
-        {visiveis.map((a) => {
-          const total = totalDe(a, curso), pago = pagoDe(a, curso), saldo = saldoDe(a, curso);
-          const quit = saldo <= 0;
-          const pct = total > 0 ? Math.min((pago / total) * 100, 100) : 0;
+        {(turmas || []).map((t) => {
+          const lista = daTurma(t.id);
+          const s = somaDe(lista);
+          const pct = s.previsto > 0 ? Math.min((s.recebido / s.previsto) * 100, 100) : 0;
           return (
-            <div key={a.id} className="p-3.5" style={card}>
+            <div key={t.id} className="p-3.5" style={card}>
               <div className="flex items-start gap-2">
-                <button onClick={() => setAberta(a.id)} className="flex-1 min-w-0 text-left">
-                  <div className="font-semibold truncate" style={{ color: C.ink }}>{a.nome}</div>
+                <button onClick={() => setTurmaAberta(t.id)} className="flex-1 min-w-0 text-left">
+                  <div className="font-semibold truncate" style={{ color: C.ink }}>{t.nome}</div>
                   <div className="text-xs mt-0.5" style={{ color: C.muted }}>
-                    <span>{nomeMes(a.mentoria)}</span>
-                    {" · "}{a.modalidade === "avista" ? "Pix à vista" : `${parcelasDe(a, curso)}x de ${brl(valorParcelaDe(a, curso))}`}
-                    {a.matriculaPaga ? " · matrícula paga" : " · matrícula em aberto"}
-                    {a.telefone ? ` · ${a.telefone}` : ""}
+                    {lista.length} {lista.length === 1 ? "aluna" : "alunas"}
+                    {s.previsto > 0 ? ` · ${brl(s.recebido)} de ${brl(s.previsto)}` : ""}
                   </div>
                 </button>
-                <button onClick={() => setForm({ ...a })} className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ color: C.muted, border: `1px solid ${C.line}` }} aria-label="Editar"><Pencil size={14} /></button>
-                <button onClick={() => setApagar(a)} className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ color: C.coral, border: `1px solid ${C.line}` }} aria-label="Remover"><Trash2 size={14} /></button>
+                <button onClick={() => setNovaTurma({ id: t.id, nome: t.nome })}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ color: C.muted, border: `1px solid ${C.line}` }} aria-label="Renomear turma"><Pencil size={14} /></button>
+                <button onClick={() => setApagarTurma(t)} className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ color: C.coral, border: `1px solid ${C.line}` }} aria-label="Remover turma"><Trash2 size={14} /></button>
               </div>
-
-              <button onClick={() => setAberta(a.id)} className="w-full text-left mt-2.5">
-                <div className="flex justify-between text-xs mb-1.5">
-                  <span style={{ color: C.muted }}>Pago {brl(pago)} de {brl(total)}</span>
-                  <span style={{ color: quit ? C.goodFg : C.coral, fontWeight: 600 }}>
-                    {quit ? "quitado" : `falta ${brl(saldo)}`}
-                  </span>
-                </div>
-                <div className="rounded-full overflow-hidden" style={{ height: 6, background: C.bg }}>
-                  <div style={{ height: "100%", width: `${pct}%`, background: quit ? C.goodFg : C.coral, transition: "width .25s" }} />
-                </div>
-              </button>
+              {s.previsto > 0 && (
+                <button onClick={() => setTurmaAberta(t.id)} className="w-full mt-2.5">
+                  <div className="rounded-full overflow-hidden" style={{ height: 6, background: C.bg }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: s.aReceber <= 0 ? C.goodFg : C.coral, transition: "width .25s" }} />
+                  </div>
+                </button>
+              )}
             </div>
           );
         })}
       </div>
 
-      {form && (
-        <Overlay onClose={() => setForm(null)} C={C}>
-          <Topo titulo={form.id ? "Editar aluna" : "Nova aluna"} onClose={() => setForm(null)} C={C} />
-          <div className="text-xs mb-1" style={{ color: C.muted }}>Nome</div>
-          <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome completo" style={input} />
-          <div className="text-xs mb-1 mt-3" style={{ color: C.muted }}>Telefone</div>
-          <input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(00) 00000-0000" style={input} />
-
-          <label className="block mt-3">
-            <div className="text-xs mb-1" style={{ color: C.muted }}>Mentoria que ela faz</div>
-            <input type="month" value={form.mentoria || ""} onChange={(e) => setForm({ ...form, mentoria: e.target.value })} style={input} />
-            <div className="text-xs mt-1" style={{ color: C.faint }}>Serve para separar as turmas: {nomeMes(form.mentoria)}</div>
-          </label>
-
-          <div className="text-xs mb-1.5 mt-3" style={{ color: C.muted }}>Forma de pagamento do curso</div>
-          <div className="flex gap-2">
-            {[["parcelado", `Parcelado · ${brl(curso.parcelado)}`], ["avista", `Pix à vista · ${brl(curso.avista)}`]].map(([k, l]) => (
-              <button key={k} onClick={() => setForm({ ...form, modalidade: k })} className="flex-1 text-xs rounded-lg py-2.5 font-medium"
-                      style={{ background: form.modalidade === k ? C.ink : C.surface, color: form.modalidade === k ? "#fff" : C.muted,
-                               border: `1px solid ${form.modalidade === k ? C.ink : C.line}` }}>{l}</button>
-            ))}
-          </div>
-          {form.modalidade === "parcelado" && (
-            <label className="block mt-3">
-              <div className="text-xs mb-1" style={{ color: C.muted }}>Em quantas vezes</div>
-              <input inputMode="numeric" value={form.parcelas}
-                     onChange={(e) => setForm({ ...form, parcelas: e.target.value.replace(/\D/g, "") })}
-                     placeholder={`padrão: ${curso.maxParcelas}x`} style={input} />
-              <div className="text-xs mt-1" style={{ color: C.faint }}>
-                {parcelasDe(form, curso)}x de <b style={{ color: C.muted }}>{brl(valorParcelaDe(form, curso))}</b>
-              </div>
-            </label>
-          )}
-
-          <div className="rounded-xl p-3 mt-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
-            <div className="text-xs mb-2" style={{ color: C.muted }}>
-              Valores desta aluna — deixe em branco para usar o padrão do curso
-            </div>
-            <div className="flex gap-2">
-              <label className="flex-1">
-                <div className="text-xs mb-1" style={{ color: C.muted }}>Matrícula (R$)</div>
-                <input inputMode="decimal" value={form.valorMatricula}
-                       onChange={(e) => setForm({ ...form, valorMatricula: e.target.value })}
-                       placeholder={String(curso.matricula)} style={{ ...input, background: C.surface }} />
-              </label>
-              <label className="flex-1">
-                <div className="text-xs mb-1" style={{ color: C.muted }}>Curso (R$)</div>
-                <input inputMode="decimal" value={form.valorCurso}
-                       onChange={(e) => setForm({ ...form, valorCurso: e.target.value })}
-                       placeholder={String(form.modalidade === "avista" ? curso.avista : curso.parcelado)}
-                       style={{ ...input, background: C.surface }} />
-              </label>
-            </div>
-            <div className="text-xs mt-2" style={{ color: C.muted }}>
-              Total desta aluna: <b style={{ color: C.ink }}>{brl(totalDe(form, curso))}</b>
-            </div>
-          </div>
-
-          <label className="flex items-start gap-2.5 cursor-pointer rounded-xl p-2.5 mt-3"
-                 style={{ background: form.matriculaPaga ? C.tealSoft : C.bg, border: `1px solid ${form.matriculaPaga ? C.teal + "44" : C.line}` }}>
-            <input type="checkbox" checked={!!form.matriculaPaga}
-                   onChange={(e) => setForm({ ...form, matriculaPaga: e.target.checked, matriculaData: e.target.checked ? (form.matriculaData || hojeKey()) : "" })}
-                   className="mt-0.5" style={{ accentColor: C.teal, width: 16, height: 16 }} />
-            <span className="flex-1">
-              <span className="text-sm block" style={{ color: C.ink }}>Matrícula já paga</span>
-              <span className="text-xs" style={{ color: C.muted }}>
-                Conta {brl(matriculaDe(form, curso))} como pago, sem precisar lançar.
-              </span>
-            </span>
-          </label>
-          {form.matriculaPaga && (
-            <label className="block mt-2">
-              <div className="text-xs mb-1" style={{ color: C.muted }}>Quando pagou a matrícula</div>
-              <input type="date" value={form.matriculaData || ""} onChange={(e) => setForm({ ...form, matriculaData: e.target.value })} style={input} />
-            </label>
-          )}
-
-          <div className="text-xs mb-1 mt-3" style={{ color: C.muted }}>Observações</div>
-          <input value={form.obs} onChange={(e) => setForm({ ...form, obs: e.target.value })} placeholder="opcional" style={input} />
-
-          <button onClick={salvarAluna} disabled={!(form.nome || "").trim()}
+      {novaTurma && (
+        <Overlay onClose={() => setNovaTurma(null)} C={C}>
+          <Topo titulo={novaTurma.id ? "Renomear turma" : "Nova turma"} onClose={() => setNovaTurma(null)} C={C} />
+          <div className="text-xs mb-1" style={{ color: C.muted }}>Nome da turma</div>
+          <input value={novaTurma.nome} autoFocus onChange={(e) => setNovaTurma({ ...novaTurma, nome: e.target.value })}
+                 onKeyDown={(e) => { if (e.key === "Enter") salvarTurma(); }}
+                 placeholder="Ex: Agosto de 2026" style={input} />
+          <button onClick={salvarTurma} disabled={!(novaTurma.nome || "").trim()}
                   className="w-full rounded-xl py-3 font-medium mt-4"
-                  style={{ background: (form.nome || "").trim() ? C.ink : C.line, color: (form.nome || "").trim() ? "#fff" : C.muted }}>
-            Salvar
-          </button>
+                  style={{ background: (novaTurma.nome || "").trim() ? C.ink : C.line,
+                           color: (novaTurma.nome || "").trim() ? "#fff" : C.muted }}>Salvar</button>
         </Overlay>
       )}
 
-      {apagar && (
-        <Overlay onClose={() => setApagar(null)} C={C}>
-          <div className="text-base font-medium mb-2" style={{ color: C.ink }}>Remover aluna</div>
+      {apagarTurma && (
+        <Overlay onClose={() => setApagarTurma(null)} C={C}>
+          <div className="text-base font-medium mb-2" style={{ color: C.ink }}>Remover turma</div>
           <div className="text-sm" style={{ color: C.muted }}>
-            Apagar <b style={{ color: C.ink }}>{apagar.nome}</b> e todos os pagamentos lançados para ela?
+            Apagar <b style={{ color: C.ink }}>{apagarTurma.nome}</b>?
           </div>
+          {daTurma(apagarTurma.id).length > 0 && (
+            <div className="text-xs mt-2 p-2.5 rounded-lg" style={{ background: C.coralSoft, color: C.coral }}>
+              As {daTurma(apagarTurma.id).length} alunas dela não são apagadas — voltam para “sem turma”.
+            </div>
+          )}
           <div className="flex gap-2 mt-4">
-            <button onClick={() => setApagar(null)} className="flex-1 rounded-xl py-3 font-medium"
+            <button onClick={() => setApagarTurma(null)} className="flex-1 rounded-xl py-3 font-medium"
                     style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>Cancelar</button>
-            <button onClick={() => { onSaveAlunas((alunas || []).filter((x) => x.id !== apagar.id)); setApagar(null); }}
+            <button onClick={() => {
+                      onSaveAlunas((alunas || []).map((a) => (a.turmaId === apagarTurma.id ? { ...a, turmaId: "" } : a)));
+                      onSaveTurmas((turmas || []).filter((t) => t.id !== apagarTurma.id));
+                      setApagarTurma(null);
+                    }}
                     className="flex-1 rounded-xl py-3 font-medium" style={{ background: C.coral, color: "#fff" }}>Remover</button>
           </div>
         </Overlay>
       )}
     </div>
+  );
+}
+
+// cartao de uma aluna dentro da turma
+// Formulario de cadastro/edicao de aluna. A turma vem de fora (a que esta
+// aberta), entao nao aparece aqui.
+function FormAluna({ form, setForm, salvar, curso, C, input }) {
+  const ok = !!(form.nome || "").trim();
+  return (
+    <Overlay onClose={() => setForm(null)} C={C}>
+      <Topo titulo={form.id ? "Editar aluna" : "Nova aluna"} onClose={() => setForm(null)} C={C} />
+
+      <div className="text-xs mb-1" style={{ color: C.muted }}>Nome</div>
+      <input value={form.nome} autoFocus onChange={(e) => setForm({ ...form, nome: e.target.value })}
+             placeholder="Nome completo" style={input} />
+
+      <div className="text-xs mb-1 mt-3" style={{ color: C.muted }}>Telefone</div>
+      <input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })}
+             placeholder="(00) 00000-0000" style={input} />
+
+      <div className="text-xs mb-1.5 mt-3" style={{ color: C.muted }}>Forma de pagamento do curso</div>
+      <div className="flex gap-2">
+        {[["parcelado", `Parcelado · ${brl(curso.parcelado)}`], ["avista", `Pix à vista · ${brl(curso.avista)}`]].map(([k, l]) => (
+          <button key={k} onClick={() => setForm({ ...form, modalidade: k })} className="flex-1 text-xs rounded-lg py-2.5 font-medium"
+                  style={{ background: form.modalidade === k ? C.ink : C.surface, color: form.modalidade === k ? "#fff" : C.muted,
+                           border: `1px solid ${form.modalidade === k ? C.ink : C.line}` }}>{l}</button>
+        ))}
+      </div>
+
+      {form.modalidade === "parcelado" && (
+        <label className="block mt-3">
+          <div className="text-xs mb-1" style={{ color: C.muted }}>Em quantas vezes</div>
+          <input inputMode="numeric" value={form.parcelas}
+                 onChange={(e) => setForm({ ...form, parcelas: e.target.value.replace(/\D/g, "") })}
+                 placeholder={`padrão: ${curso.maxParcelas}x`} style={input} />
+          <div className="text-xs mt-1" style={{ color: C.faint }}>
+            {parcelasDe(form, curso)}x de <b style={{ color: C.muted }}>{brl(valorParcelaDe(form, curso))}</b>
+          </div>
+        </label>
+      )}
+
+      <div className="rounded-xl p-3 mt-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+        <div className="text-xs mb-2" style={{ color: C.muted }}>
+          Valores desta aluna — deixe em branco para usar o padrão do curso
+        </div>
+        <div className="flex gap-2">
+          <label className="flex-1">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Matrícula (R$)</div>
+            <input inputMode="decimal" value={form.valorMatricula}
+                   onChange={(e) => setForm({ ...form, valorMatricula: e.target.value })}
+                   placeholder={String(curso.matricula)} style={{ ...input, background: C.surface }} />
+          </label>
+          <label className="flex-1">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Curso (R$)</div>
+            <input inputMode="decimal" value={form.valorCurso}
+                   onChange={(e) => setForm({ ...form, valorCurso: e.target.value })}
+                   placeholder={String(form.modalidade === "avista" ? curso.avista : curso.parcelado)}
+                   style={{ ...input, background: C.surface }} />
+          </label>
+        </div>
+        <div className="text-xs mt-2" style={{ color: C.muted }}>
+          Total desta aluna: <b style={{ color: C.ink }}>{brl(totalDe(form, curso))}</b>
+        </div>
+      </div>
+
+      <label className="flex items-start gap-2.5 cursor-pointer rounded-xl p-2.5 mt-3"
+             style={{ background: form.matriculaPaga ? C.tealSoft : C.bg, border: `1px solid ${form.matriculaPaga ? C.teal + "44" : C.line}` }}>
+        <input type="checkbox" checked={!!form.matriculaPaga}
+               onChange={(e) => setForm({ ...form, matriculaPaga: e.target.checked, matriculaData: e.target.checked ? (form.matriculaData || hojeKey()) : "" })}
+               className="mt-0.5" style={{ accentColor: C.teal, width: 16, height: 16 }} />
+        <span className="flex-1">
+          <span className="text-sm block" style={{ color: C.ink }}>Matrícula já paga</span>
+          <span className="text-xs" style={{ color: C.muted }}>
+            Conta {brl(matriculaDe(form, curso))} como pago, sem precisar lançar.
+          </span>
+        </span>
+      </label>
+      {form.matriculaPaga && (
+        <label className="block mt-2">
+          <div className="text-xs mb-1" style={{ color: C.muted }}>Quando pagou a matrícula</div>
+          <input type="date" value={form.matriculaData || ""} onChange={(e) => setForm({ ...form, matriculaData: e.target.value })} style={input} />
+        </label>
+      )}
+
+      <div className="text-xs mb-1 mt-3" style={{ color: C.muted }}>Observações</div>
+      <input value={form.obs} onChange={(e) => setForm({ ...form, obs: e.target.value })} placeholder="opcional" style={input} />
+
+      <button onClick={salvar} disabled={!ok} className="w-full rounded-xl py-3 font-medium mt-4"
+              style={{ background: ok ? C.ink : C.line, color: ok ? "#fff" : C.muted }}>Salvar</button>
+    </Overlay>
+  );
+}
+
+function CartaoAluna({ a, curso, C, card, onAbrir, onEditar, onApagar }) {
+  const total = totalDe(a, curso), pago = pagoDe(a, curso), saldo = saldoDe(a, curso);
+  const quit = saldo <= 0;
+  const pct = total > 0 ? Math.min((pago / total) * 100, 100) : 0;
+  return (
+    <div className="p-3.5" style={card}>
+      <div className="flex items-start gap-2">
+        <button onClick={onAbrir} className="flex-1 min-w-0 text-left">
+          <div className="font-semibold truncate" style={{ color: C.ink }}>{a.nome}</div>
+          <div className="text-xs mt-0.5" style={{ color: C.muted }}>
+            {a.modalidade === "avista" ? "Pix à vista" : `${parcelasDe(a, curso)}x de ${brl(valorParcelaDe(a, curso))}`}
+            {a.matriculaPaga ? " · matrícula paga" : " · matrícula em aberto"}
+            {a.telefone ? ` · ${a.telefone}` : ""}
+          </div>
+        </button>
+        <button onClick={onEditar} className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                style={{ color: C.muted, border: `1px solid ${C.line}` }} aria-label="Editar"><Pencil size={14} /></button>
+        <button onClick={onApagar} className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                style={{ color: C.coral, border: `1px solid ${C.line}` }} aria-label="Remover"><Trash2 size={14} /></button>
+      </div>
+      <button onClick={onAbrir} className="w-full text-left mt-2.5">
+        <div className="flex justify-between text-xs mb-1.5">
+          <span style={{ color: C.muted }}>Pago {brl(pago)} de {brl(total)}</span>
+          <span style={{ color: quit ? C.goodFg : C.coral, fontWeight: 600 }}>{quit ? "quitado" : `falta ${brl(saldo)}`}</span>
+        </div>
+        <div className="rounded-full overflow-hidden" style={{ height: 6, background: C.bg }}>
+          <div style={{ height: "100%", width: `${pct}%`, background: quit ? C.goodFg : C.coral, transition: "width .25s" }} />
+        </div>
+      </button>
+    </div>
+  );
+}
+
+function ConfirmaApagar({ aluna, onCancelar, onConfirmar, C }) {
+  return (
+    <Overlay onClose={onCancelar} C={C}>
+      <div className="text-base font-medium mb-2" style={{ color: C.ink }}>Remover aluna</div>
+      <div className="text-sm" style={{ color: C.muted }}>
+        Apagar <b style={{ color: C.ink }}>{aluna.nome}</b> e todos os pagamentos lançados para ela?
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button onClick={onCancelar} className="flex-1 rounded-xl py-3 font-medium"
+                style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>Cancelar</button>
+        <button onClick={onConfirmar} className="flex-1 rounded-xl py-3 font-medium"
+                style={{ background: C.coral, color: "#fff" }}>Remover</button>
+      </div>
+    </Overlay>
   );
 }
 

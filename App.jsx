@@ -318,6 +318,7 @@ const CHAMADAS_KEY = "agenda:chamadas:v1";
 const MENTORIA_KEY = "agenda:mentoria:v1";
 const ESTOQUE_MESES_KEY = "agenda:estoque-meses:v1";
 const ALUNAS_KEY = "agenda:alunas:v1";
+const TURMAS_KEY = "agenda:turmas:v1";
 const CURSO_KEY = "agenda:curso:v1";
 // Valores padrao do curso; ficam editaveis na propria aba.
 const CURSO_PADRAO = { matricula: 350, parcelado: 3950, avista: 3650, maxParcelas: 6 };
@@ -348,6 +349,7 @@ export default function App() {
   const [estoqueMeses, setEstoqueMeses] = useState([]); // [{ ym, fechadoEm, itens:[{nome,inicial,usado,final}] }]
   const [mentoriaDatas, setMentoriaDatas] = useState(""); // ex: "nos dias 12 e 13 de novembro"
   const [alunas, setAlunas] = useState([]);
+  const [turmas, setTurmas] = useState([]); // [{ id, nome }]
   const [curso, setCurso] = useState(CURSO_PADRAO);
   const [auth, setAuth] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -392,9 +394,9 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e, pr, ch, al, cu, mt, em] = await Promise.all([
+      const [c, n, p, e, pr, ch, al, cu, mt, em, tu] = await Promise.all([
         ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY), ler(CHAMADAS_KEY),
-        ler(ALUNAS_KEY), ler(CURSO_KEY), ler(MENTORIA_KEY), ler(ESTOQUE_MESES_KEY),
+        ler(ALUNAS_KEY), ler(CURSO_KEY), ler(MENTORIA_KEY), ler(ESTOQUE_MESES_KEY), ler(TURMAS_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
@@ -407,6 +409,7 @@ export default function App() {
       const vcu = parse(cu); if (vcu) setCurso({ ...CURSO_PADRAO, ...vcu });
       const vmt = parse(mt); if (vmt && typeof vmt.datas === "string") setMentoriaDatas(vmt.datas);
       const vem = parse(em); if (Array.isArray(vem)) setEstoqueMeses(vem);
+      const vtu = parse(tu); if (Array.isArray(vtu)) setTurmas(vtu);
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -476,6 +479,20 @@ export default function App() {
     flash(`Mês fechado. A contagem recomeça do zero.`);
   };
   const persistMentoria = async (datas) => { setMentoriaDatas(datas); try { await store.set(MENTORIA_KEY, JSON.stringify({ datas })); } catch (_) {} };
+  const persistTurmas = async (next) => { setTurmas(next); try { await store.set(TURMAS_KEY, JSON.stringify(next)); } catch (_) {} };
+  // Cria a turma e ja move as alunas indicadas para dentro dela, numa gravacao so.
+  const criarTurmaCom = async (nome, idsAlunas) => {
+    const id = uid();
+    const nextTurmas = [...(turmas || []), { id, nome, criadaEm: todayKey() }];
+    const alvo = new Set(idsAlunas || []);
+    const nextAlunas = (alunas || []).map((a) => (alvo.has(a.id) ? { ...a, turmaId: id } : a));
+    setTurmas(nextTurmas); setAlunas(nextAlunas);
+    try {
+      await store.set(TURMAS_KEY, JSON.stringify(nextTurmas));
+      if (alvo.size) await store.set(ALUNAS_KEY, JSON.stringify(nextAlunas));
+    } catch (_) {}
+    return id;
+  };
   const persistAlunas = async (next) => { setAlunas(next); try { await store.set(ALUNAS_KEY, JSON.stringify(next)); } catch (_) {} };
   const persistCurso = async (next) => { setCurso(next); try { await store.set(CURSO_KEY, JSON.stringify(next)); } catch (_) {} };
   const persistChamadas = async (next) => { setChamadas(next); try { await store.set(CHAMADAS_KEY, JSON.stringify(next)); } catch (_) {} };
@@ -791,7 +808,8 @@ export default function App() {
           </Suspense>
         ) : view === "alunas" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
-            <AlunasView alunas={alunas} curso={curso} onSaveAlunas={persistAlunas} onSaveCurso={persistCurso} C={C} />
+            <AlunasView alunas={alunas} turmas={turmas} curso={curso} onSaveAlunas={persistAlunas}
+                        onSaveTurmas={persistTurmas} onCriarTurmaCom={criarTurmaCom} onSaveCurso={persistCurso} C={C} />
           </Suspense>
         ) : view === "procedimentos" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
