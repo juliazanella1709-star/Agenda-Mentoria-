@@ -448,9 +448,30 @@ export default function App() {
   const toggleNota = (id) => persistNotas(notas.map((n) => (n.id === id ? { ...n, done: !n.done } : n)));
   const delNota = (id) => persistNotas(notas.filter((n) => n.id !== id));
   const persistPeople = async (next) => { setPeople(next); try { await store.set(PEOPLE_KEY, JSON.stringify(next)); } catch (_) {} };
-  const savePerson = (data) => {
-    const next = data.id ? people.map((p) => (p.id === data.id ? data : p)) : [...people, { ...data, id: uid() }];
-    persistPeople(next); setPatientForm(null); flash("Paciente cadastrado.");
+  // Salva o paciente no cadastro E leva o dado novo para as consultas dele. Sem
+  // isso, corrigir um telefone aqui nao arrumaria o WhatsApp das abas que leem
+  // da consulta (Chamar de volta, Retornos, agenda do dia).
+  const savePerson = async (data) => {
+    const nome = (data.name || "").trim();
+    const chave = normNome(data.nomeOriginal || nome);
+    const achou = (people || []).find((p) => normNome(p.name) === chave);
+    const limpo = { name: nome, phone: data.phone || "", instagram: igHandle(data.instagram || "") };
+
+    const nextPeople = achou
+      ? people.map((p) => (normNome(p.name) === chave ? { ...p, ...limpo } : p))
+      : [...people, { ...limpo, id: uid() }];
+
+    const temConsulta = (items || []).some((it) => normNome(it.patient) === chave);
+    const nextItems = temConsulta
+      ? items.map((it) => (normNome(it.patient) === chave
+          ? { ...it, patient: nome, phone: limpo.phone, instagram: limpo.instagram }
+          : it))
+      : items;
+
+    persistPeople(nextPeople);
+    if (temConsulta) { setItems(nextItems); try { await store.set(STORAGE_KEY, JSON.stringify(nextItems)); } catch (_) {} }
+    setPatientForm(null);
+    flash(data.nomeOriginal ? "Dados atualizados." : "Paciente cadastrado.");
   };
   const weekShift = (dir) => { const d = parseKey(selected); d.setDate(d.getDate() + dir * (weekSpan >= 7 ? 7 : weekSpan)); setSelected(keyOf(d)); setCursor({ y: d.getFullYear(), m: d.getMonth() }); };
   // Correcao em lote das consultas que ficaram concluidas com saldo em aberto.
@@ -792,7 +813,8 @@ export default function App() {
           )
         ) : view === "pacientes" ? (
           <PatientsView items={items} people={people} query={query} onAgendar={openNewFor} onHistory={openHistory}
-                        mentoriaDatas={mentoriaDatas} onSaveMentoria={persistMentoria} onCadastrar={() => setPatientForm({})} />
+                        mentoriaDatas={mentoriaDatas} onSaveMentoria={persistMentoria} onCadastrar={() => setPatientForm({})}
+                        onEditar={(p) => setPatientForm({ name: p.name, phone: p.phone || "", instagram: p.instagram || "", nomeOriginal: p.name })} />
         ) : view === "retornos" ? (
           <RetornosView items={items} retornos={chamadas} onMarcar={marcarChamado}
                         onDesfazer={desfazerChamado} onAgendar={openNewFor} onHistory={openHistory} />
@@ -1072,7 +1094,7 @@ function BarraMentoria({ datas, onSave }) {
   );
 }
 
-function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar, mentoriaDatas, onSaveMentoria }) {
+function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar, onEditar, mentoriaDatas, onSaveMentoria }) {
   const patients = useMemo(() => derivePatients(items, people), [items, people]);
   const q = query.trim().toLowerCase();
   const list = q ? patients.filter((p) => p.name.toLowerCase().includes(q) || (p.phone || "").includes(q) || (p.instagram || "").toLowerCase().includes(q)) : patients;
@@ -1125,6 +1147,10 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar,
               <button onClick={() => onHistory(p.name)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.tealSoft, color: C.teal }}>Histórico</button>
               <button onClick={() => onAgendar(p)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Agendar</button>
             </div>
+            <button onClick={() => onEditar(p)} className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium flex items-center justify-center gap-1.5"
+                    style={{ background: C.bg, color: C.muted, border: `1px solid ${C.line}` }}>
+              <Pencil size={12} /> Editar dados
+            </button>
             {temTelefone(p.phone) && (
               <a href={waLink(p.phone, msgConvite(p.name, mentoriaDatas))} target="_blank" rel="noreferrer"
                  className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium flex items-center justify-center gap-1.5"
@@ -1901,12 +1927,13 @@ function PatientFormModal({ initial, onClose, onSave }) {
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const inputStyle = { width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink };
   const submit = () => { if (!f.name.trim()) return setErr("Informe o nome."); onSave({ ...f, name: f.name.trim(), instagram: igHandle(f.instagram) }); };
+  const editando = !!(initial && initial.nomeOriginal);
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 55, background: "#26232a66", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div className="ag-pop ff-b" onClick={(e) => e.stopPropagation()}
            style={{ background: C.surface, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", borderRadius: 18, padding: 22 }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="ff-d text-lg" style={{ fontWeight: 600, color: C.ink }}>{f.id ? "Editar paciente" : "Cadastrar paciente"}</div>
+          <div className="ff-d text-lg" style={{ fontWeight: 600, color: C.ink }}>{editando ? "Editar dados do paciente" : "Cadastrar paciente"}</div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.bg }}><X size={17} color={C.ink} /></button>
         </div>
         <div className="space-y-3">
