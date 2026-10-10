@@ -76,6 +76,9 @@ const waNumero = (tel) => {
   if (!d) return "";
   return d.startsWith("55") && d.length > 11 ? d : "55" + d;
 };
+// Telefone so serve se tiver digito. Varios cadastros vieram com "." no campo,
+// que passava no teste de "tem telefone" mas gerava link vazio.
+const temTelefone = (tel) => !!(tel || "").replace(/\D/g, "");
 const waLink = (tel, texto) => {
   const n = waNumero(tel);
   if (!n) return null;
@@ -945,7 +948,7 @@ function Card({ it, onEdit, onDelete, onStatus }) {
         {(it.instagram || it.phone) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs" style={{ color: C.muted }}>
             {it.instagram && <span className="flex items-center gap-1"><Instagram size={12} /> @{igHandle(it.instagram)}</span>}
-            {it.phone && <span className="flex items-center gap-1"><Phone size={12} /> {it.phone}</span>}
+            {temTelefone(it.phone) && <span className="flex items-center gap-1"><Phone size={12} /> {it.phone}</span>}
           </div>
         )}
 
@@ -961,7 +964,7 @@ function Card({ it, onEdit, onDelete, onStatus }) {
         {it.notes && <div className="text-xs mt-2 rounded-lg px-2.5 py-1.5" style={{ background: C.bg, color: C.muted }}>{it.notes}</div>}
 
         <div className="flex items-center gap-1 mt-2.5 flex-wrap">
-          {it.phone && it.status !== "cancelado" && (
+          {temTelefone(it.phone) && it.status !== "cancelado" && (
             <a href={waLink(it.phone, msgConfirmacao(it))} target="_blank" rel="noreferrer"
                className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 font-medium"
                style={{ background: C.goodBg, color: C.goodFg }}>
@@ -1103,8 +1106,8 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar,
               <div className="min-w-0">
                 <div className="font-semibold truncate" style={{ color: C.ink }}>{p.name}</div>
                 <div className="text-xs truncate" style={{ color: C.muted }}>
-                  {p.instagram ? "@" + p.instagram : ""}{p.instagram && p.phone ? " · " : ""}{p.phone || ""}
-                  {!p.instagram && !p.phone ? "sem contato" : ""}
+                  {p.instagram ? "@" + p.instagram : ""}{p.instagram && temTelefone(p.phone) ? " · " : ""}{temTelefone(p.phone) ? p.phone : ""}
+                  {!p.instagram && !temTelefone(p.phone) ? "sem contato" : ""}
                 </div>
               </div>
             </button>
@@ -1122,7 +1125,7 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar,
               <button onClick={() => onHistory(p.name)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.tealSoft, color: C.teal }}>Histórico</button>
               <button onClick={() => onAgendar(p)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Agendar</button>
             </div>
-            {p.phone && (
+            {temTelefone(p.phone) && (
               <a href={waLink(p.phone, msgConvite(p.name, mentoriaDatas))} target="_blank" rel="noreferrer"
                  className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium flex items-center justify-center gap-1.5"
                  style={{ background: C.goodBg, color: C.goodFg }}>
@@ -2306,7 +2309,7 @@ function FormModal({ initial, procs, pacientes, onClose, onSave, onDelete }) {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 min-w-0">
             <div className="ff-d text-lg" style={{ fontWeight: 600, color: C.ink }}>{f.id ? "Editar consulta" : "Nova consulta"}</div>
-            {f.phone && f.date && f.time && f.status !== "cancelado" && (
+            {temTelefone(f.phone) && f.date && f.time && f.status !== "cancelado" && (
               <a href={waLink(f.phone, msgConfirmacao(f))} target="_blank" rel="noreferrer"
                  title="Abrir o WhatsApp com a mensagem de confirmação pronta"
                  className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 font-medium shrink-0"
