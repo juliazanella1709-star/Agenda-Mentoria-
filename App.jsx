@@ -508,6 +508,13 @@ export default function App() {
     } catch (_) {}
     flash("Mês fechado. A contagem recomeça do zero.");
   };
+  // Apaga um mes do historico. Nao mexe no estoque atual nem refaz a contagem.
+  const apagarMesEstoque = async (ym) => {
+    const historico = (estoqueMeses || []).filter((m) => m.ym !== ym);
+    setEstoqueMeses(historico);
+    try { await store.set(ESTOQUE_MESES_KEY, JSON.stringify(historico)); } catch (_) {}
+    flash("Mês removido do histórico.");
+  };
   const persistEstoqueMes = async (mes) => { setEstoqueMes(mes); try { await store.set(ESTOQUE_ATIVO_KEY, JSON.stringify({ mes })); } catch (_) {} };
   const persistMentoria = async (datas) => { setMentoriaDatas(datas); try { await store.set(MENTORIA_KEY, JSON.stringify({ datas })); } catch (_) {} };
   const persistTurmas = async (next) => { setTurmas(next); try { await store.set(TURMAS_KEY, JSON.stringify(next)); } catch (_) {} };
@@ -833,6 +840,7 @@ export default function App() {
           <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
         ) : view === "estoque" ? (
           <EstoqueView estoque={estoque} meses={estoqueMeses} onFecharMes={fecharMesEstoque}
+                       onApagarMes={apagarMesEstoque}
                        mesAtivo={estoqueMes} onSetMes={persistEstoqueMes}
                        onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
         ) : view === "relatorio" ? (
@@ -2011,7 +2019,8 @@ function SeletorMes({ valor, onChange, C }) {
   );
 }
 
-function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, onSet, onDel, onEdit }) {
+function EstoqueView({ estoque, meses, onFecharMes, onApagarMes, mesAtivo, onSetMes, onAdd, onSet, onDel, onEdit }) {
+  const [apagarMes, setApagarMes] = useState(null);
   const [aba, setAba] = useState("atual");          // atual | historico
   const [verMes, setVerMes] = useState("");
   const [confirmarFechar, setConfirmarFechar] = useState(false);
@@ -2085,8 +2094,10 @@ function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, o
                       <span style={{ width: 54, textAlign: "right", color: C.muted }}>{i.final}</span>
                     </div>
                   ))}
-                  <div className="px-4 py-2 text-xs" style={{ borderTop: `1px solid ${C.line}`, color: C.faint }}>
-                    fechado em {shortDate(mesVisto.fechadoEm)}
+                  <div className="px-4 py-2 flex items-center justify-between" style={{ borderTop: `1px solid ${C.line}` }}>
+                    <span className="text-xs" style={{ color: C.faint }}>fechado em {shortDate(mesVisto.fechadoEm)}</span>
+                    <button onClick={() => setApagarMes(mesVisto)} className="text-xs rounded-lg px-2.5 py-1 font-medium"
+                            style={{ color: C.coral, border: `1px solid ${C.line}` }}>Apagar este mês</button>
                   </div>
                 </div>
               )}
@@ -2179,6 +2190,28 @@ function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, o
         </div>
       )}
       </>
+      )}
+
+      {apagarMes && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 55, background: "#26232a66", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+             onClick={() => setApagarMes(null)}>
+          <div className="ag-pop ff-b" onClick={(e) => e.stopPropagation()}
+               style={{ background: C.surface, width: "100%", maxWidth: 400, borderRadius: 18, padding: 20 }}>
+            <div className="text-base font-medium mb-2" style={{ color: C.ink }}>Apagar {nomeMes(apagarMes.ym)}?</div>
+            <div className="text-sm" style={{ color: C.muted }}>
+              O registro de consumo desse mês some do histórico.
+            </div>
+            <div className="text-xs mt-2 p-2.5 rounded-lg" style={{ background: C.bg, color: C.muted }}>
+              O estoque de agora não muda — as quantidades e a contagem do mês atual continuam como estão.
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setApagarMes(null)} className="flex-1 rounded-xl py-3 font-medium"
+                      style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>Cancelar</button>
+              <button onClick={() => { onApagarMes(apagarMes.ym); setVerMes(""); setApagarMes(null); }}
+                      className="flex-1 rounded-xl py-3 font-medium" style={{ background: C.coral, color: "#fff" }}>Apagar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {aba === "atual" && (
