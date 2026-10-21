@@ -321,6 +321,7 @@ const PROCS_KEY = "agenda:procedimentos:v1";
 const CHAMADAS_KEY = "agenda:chamadas:v1";
 const MENTORIA_KEY = "agenda:mentoria:v1";
 const ESTOQUE_MESES_KEY = "agenda:estoque-meses:v1";
+const ESTOQUE_ATIVO_KEY = "agenda:estoque-ativo:v1";
 const ALUNAS_KEY = "agenda:alunas:v1";
 const TURMAS_KEY = "agenda:turmas:v1";
 const CURSO_KEY = "agenda:curso:v1";
@@ -350,6 +351,7 @@ export default function App() {
   const [procs, setProcs] = useState(PROCS_PADRAO);
   // { "nome|categoria": { em: "AAAA-MM-DD", ref: data da consulta que gerou o prazo } }
   const [chamadas, setChamadas] = useState({});
+  const [estoqueMes, setEstoqueMes] = useState("");   // mes que o estoque atual representa
   const [estoqueMeses, setEstoqueMeses] = useState([]); // [{ ym, fechadoEm, itens:[{nome,inicial,usado,final}] }]
   const [mentoriaDatas, setMentoriaDatas] = useState(""); // ex: "nos dias 12 e 13 de novembro"
   const [alunas, setAlunas] = useState([]);
@@ -398,9 +400,9 @@ export default function App() {
     const parse = (r) => { try { return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } };
     (async () => {
       // Em paralelo: antes eram 4 idas ao Firestore em fila, uma esperando a outra.
-      const [c, n, p, e, pr, ch, al, cu, mt, em, tu] = await Promise.all([
+      const [c, n, p, e, pr, ch, al, cu, mt, em, tu, ea] = await Promise.all([
         ler(STORAGE_KEY), ler(NOTES_KEY), ler(PEOPLE_KEY), ler(STOCK_KEY), ler(PROCS_KEY), ler(CHAMADAS_KEY),
-        ler(ALUNAS_KEY), ler(CURSO_KEY), ler(MENTORIA_KEY), ler(ESTOQUE_MESES_KEY), ler(TURMAS_KEY),
+        ler(ALUNAS_KEY), ler(CURSO_KEY), ler(MENTORIA_KEY), ler(ESTOQUE_MESES_KEY), ler(TURMAS_KEY), ler(ESTOQUE_ATIVO_KEY),
       ]);
       if (cancelado) return;
       const vc = parse(c); if (vc) setItems(vc);
@@ -414,6 +416,7 @@ export default function App() {
       const vmt = parse(mt); if (vmt && typeof vmt.datas === "string") setMentoriaDatas(vmt.datas);
       const vem = parse(em); if (Array.isArray(vem)) setEstoqueMeses(vem);
       const vtu = parse(tu); if (Array.isArray(vtu)) setTurmas(vtu);
+      const vea = parse(ea); if (vea && vea.mes) setEstoqueMes(vea.mes);
       setLoading(false);
     })();
     return () => { cancelado = true; };
@@ -485,7 +488,7 @@ export default function App() {
   };
   // Fecha o mes do estoque: guarda quanto foi usado e recomeca a contagem do
   // zero, com o saldo atual virando o novo "inicial".
-  const fecharMesEstoque = async (ym) => {
+  const fecharMesEstoque = async (ym, proximoMes) => {
     const itens = (estoque || []).map((i) => ({
       nome: i.nome,
       inicial: toNum(i.inicial),
@@ -497,12 +500,15 @@ export default function App() {
     setEstoqueMeses(historico);
     const zerado = (estoque || []).map((i) => ({ ...i, inicial: toNum(i.qtd) }));
     setEstoque(zerado);
+    setEstoqueMes(proximoMes || "");
     try {
       await store.set(ESTOQUE_MESES_KEY, JSON.stringify(historico));
       await store.set(STOCK_KEY, JSON.stringify(zerado));
+      await store.set(ESTOQUE_ATIVO_KEY, JSON.stringify({ mes: proximoMes || "" }));
     } catch (_) {}
-    flash(`Mês fechado. A contagem recomeça do zero.`);
+    flash("Mês fechado. A contagem recomeça do zero.");
   };
+  const persistEstoqueMes = async (mes) => { setEstoqueMes(mes); try { await store.set(ESTOQUE_ATIVO_KEY, JSON.stringify({ mes })); } catch (_) {} };
   const persistMentoria = async (datas) => { setMentoriaDatas(datas); try { await store.set(MENTORIA_KEY, JSON.stringify({ datas })); } catch (_) {} };
   const persistTurmas = async (next) => { setTurmas(next); try { await store.set(TURMAS_KEY, JSON.stringify(next)); } catch (_) {} };
   // Cria a turma e ja move as alunas indicadas para dentro dela, numa gravacao so.
@@ -827,6 +833,7 @@ export default function App() {
           <PaymentsView items={items} query={query} onEdit={setModal} onCorrigirStatus={corrigirStatus} />
         ) : view === "estoque" ? (
           <EstoqueView estoque={estoque} meses={estoqueMeses} onFecharMes={fecharMesEstoque}
+                       mesAtivo={estoqueMes} onSetMes={persistEstoqueMes}
                        onAdd={addEstoque} onSet={setEstoqueQtd} onDel={delEstoque} onEdit={setEstoqueForm} />
         ) : view === "relatorio" ? (
           <Suspense fallback={<div className="text-center py-24 text-sm" style={{ color: C.muted }}>Carregando…</div>}>
@@ -1983,11 +1990,15 @@ function UsarControl({ item, onUse }) {
   );
 }
 
-function EstoqueView({ estoque, meses, onFecharMes, onAdd, onSet, onDel, onEdit }) {
+function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, onSet, onDel, onEdit }) {
   const [aba, setAba] = useState("atual");          // atual | historico
   const [verMes, setVerMes] = useState("");
   const [confirmarFechar, setConfirmarFechar] = useState(false);
-  const ymAtual = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; })();
+  const [editandoMes, setEditandoMes] = useState(false);
+  const [proximoMes, setProximoMes] = useState("");
+  const ymHoje = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; })();
+  // O estoque pertence a um mes escolhido, nao ao mes do relogio.
+  const ymAtual = mesAtivo || ymHoje;
   const MESES_NOME = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
   const nomeMes = (ym) => { const [y, m] = String(ym).split("-").map(Number);
     const t = `${MESES_NOME[m - 1]} de ${y}`; return t.charAt(0).toUpperCase() + t.slice(1); };
@@ -2065,6 +2076,29 @@ function EstoqueView({ estoque, meses, onFecharMes, onAdd, onSet, onDel, onEdit 
 
       {aba === "atual" && (
       <>
+      {editandoMes ? (
+        <div className="rounded-xl p-3 mb-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="text-xs mb-1" style={{ color: C.muted }}>De que mês é este estoque?</div>
+          <input type="month" defaultValue={ymAtual} autoFocus
+                 onChange={(e) => setProximoMes(e.target.value)}
+                 style={{ width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink }} />
+          <div className="flex gap-2 mt-2.5">
+            <button onClick={() => { setEditandoMes(false); setProximoMes(""); }} className="flex-1 text-xs rounded-lg py-2 font-medium"
+                    style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>Cancelar</button>
+            <button onClick={() => { onSetMes(proximoMes || ymAtual); setEditandoMes(false); setProximoMes(""); }}
+                    className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Salvar</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setEditandoMes(true)} className="w-full text-left rounded-xl px-3 py-2.5 mb-4 flex items-center gap-2"
+                style={{ background: C.tealSoft, border: `1px solid ${C.line}` }}>
+          <Package size={14} className="shrink-0" style={{ color: C.teal }} />
+          <span className="text-xs flex-1 min-w-0" style={{ color: C.teal }}>
+            Estoque de <b>{nomeMes(ymAtual)}</b>
+          </span>
+          <Pencil size={12} className="shrink-0" style={{ color: C.muted }} />
+        </button>
+      )}
 
       <div className="rounded-2xl p-3 mb-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex gap-2 items-end flex-wrap">
@@ -2134,13 +2168,17 @@ function EstoqueView({ estoque, meses, onFecharMes, onAdd, onSet, onDel, onEdit 
             <div className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${C.coral}55` }}>
               <div className="text-sm font-medium mb-1" style={{ color: C.ink }}>Fechar {nomeMes(ymAtual)}?</div>
               <div className="text-xs mb-3" style={{ color: C.muted }}>
-                O consumo deste mês fica guardado em “Meses fechados” e a contagem recomeça do zero:
-                o que sobrou hoje vira o início do próximo mês. As quantidades em estoque não mudam.
+                O consumo de {nomeMes(ymAtual)} fica guardado em “Meses fechados” e a contagem
+                recomeça do zero: o que sobrou hoje vira o início do mês novo. As quantidades em
+                estoque não mudam.
               </div>
+              <div className="text-xs mb-1" style={{ color: C.muted }}>Qual mês começa agora?</div>
+              <input type="month" value={proximoMes || ymHoje} onChange={(e) => setProximoMes(e.target.value)}
+                     style={{ width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink, marginBottom: 12 }} />
               <div className="flex gap-2">
                 <button onClick={() => setConfirmarFechar(false)} className="flex-1 text-xs rounded-lg py-2.5 font-medium"
                         style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>Cancelar</button>
-                <button onClick={() => { onFecharMes(ymAtual); setConfirmarFechar(false); setAba("historico"); }}
+                <button onClick={() => { onFecharMes(ymAtual, proximoMes || ymHoje); setConfirmarFechar(false); setProximoMes(""); setAba("historico"); }}
                         className="flex-1 text-xs rounded-lg py-2.5 font-medium" style={{ background: C.ink, color: "#fff" }}>
                   Fechar o mês
                 </button>
@@ -2149,7 +2187,7 @@ function EstoqueView({ estoque, meses, onFecharMes, onAdd, onSet, onDel, onEdit 
           ) : (
             <button onClick={() => setConfirmarFechar(true)} className="w-full text-xs rounded-xl py-2.5 font-medium"
                     style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>
-              Fechar {nomeMes(ymAtual)} e recomeçar a contagem
+              Fechar {nomeMes(ymAtual)} e começar outro mês
             </button>
           )}
         </div>
