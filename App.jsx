@@ -1990,6 +1990,27 @@ function UsarControl({ item, onUse }) {
   );
 }
 
+function SeletorMes({ valor, onChange, C }) {
+  const MM = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+  const hoje = new Date();
+  const [ano, mes] = (valor || `${hoje.getFullYear()}-${pad(hoje.getMonth() + 1)}`).split("-").map(Number);
+  const anos = [];
+  for (let a = hoje.getFullYear() - 2; a <= hoje.getFullYear() + 1; a++) anos.push(a);
+  const estilo = { background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink };
+  return (
+    <div className="flex gap-2">
+      <select value={mes} onChange={(e) => onChange(`${ano}-${pad(Number(e.target.value))}`)}
+              style={{ ...estilo, flex: 2 }}>
+        {MM.map((m, i) => <option key={m} value={i + 1}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+      </select>
+      <select value={ano} onChange={(e) => onChange(`${e.target.value}-${pad(mes)}`)}
+              style={{ ...estilo, flex: 1 }}>
+        {anos.map((a) => <option key={a} value={a}>{a}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, onSet, onDel, onEdit }) {
   const [aba, setAba] = useState("atual");          // atual | historico
   const [verMes, setVerMes] = useState("");
@@ -2079,9 +2100,7 @@ function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, o
       {editandoMes ? (
         <div className="rounded-xl p-3 mb-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="text-xs mb-1" style={{ color: C.muted }}>De que mês é este estoque?</div>
-          <input type="month" defaultValue={ymAtual} autoFocus
-                 onChange={(e) => setProximoMes(e.target.value)}
-                 style={{ width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink }} />
+          <SeletorMes valor={proximoMes || ymAtual} onChange={setProximoMes} C={C} />
           <div className="flex gap-2 mt-2.5">
             <button onClick={() => { setEditandoMes(false); setProximoMes(""); }} className="flex-1 text-xs rounded-lg py-2 font-medium"
                     style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>Cancelar</button>
@@ -2090,7 +2109,7 @@ function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, o
           </div>
         </div>
       ) : (
-        <button onClick={() => setEditandoMes(true)} className="w-full text-left rounded-xl px-3 py-2.5 mb-4 flex items-center gap-2"
+        <button onClick={() => { setProximoMes(ymAtual); setEditandoMes(true); }} className="w-full text-left rounded-xl px-3 py-2.5 mb-4 flex items-center gap-2"
                 style={{ background: C.tealSoft, border: `1px solid ${C.line}` }}>
           <Package size={14} className="shrink-0" style={{ color: C.teal }} />
           <span className="text-xs flex-1 min-w-0" style={{ color: C.teal }}>
@@ -2173,8 +2192,9 @@ function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, o
                 estoque não mudam.
               </div>
               <div className="text-xs mb-1" style={{ color: C.muted }}>Qual mês começa agora?</div>
-              <input type="month" value={proximoMes || ymHoje} onChange={(e) => setProximoMes(e.target.value)}
-                     style={{ width: "100%", background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 11px", fontSize: 14, color: C.ink, marginBottom: 12 }} />
+              <div style={{ marginBottom: 12 }}>
+                <SeletorMes valor={proximoMes || ymHoje} onChange={setProximoMes} C={C} />
+              </div>
               <div className="flex gap-2">
                 <button onClick={() => setConfirmarFechar(false)} className="flex-1 text-xs rounded-lg py-2.5 font-medium"
                         style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>Cancelar</button>
@@ -2185,7 +2205,7 @@ function EstoqueView({ estoque, meses, onFecharMes, mesAtivo, onSetMes, onAdd, o
               </div>
             </div>
           ) : (
-            <button onClick={() => setConfirmarFechar(true)} className="w-full text-xs rounded-xl py-2.5 font-medium"
+            <button onClick={() => { setProximoMes(ymHoje); setConfirmarFechar(true); }} className="w-full text-xs rounded-xl py-2.5 font-medium"
                     style={{ background: C.surface, color: C.muted, border: `1px solid ${C.line}` }}>
               Fechar {nomeMes(ymAtual)} e começar outro mês
             </button>
