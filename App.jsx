@@ -51,6 +51,7 @@ const PROCS_PADRAO = [
   { nome: "Bioestimulador de colágeno (DIAMOND)", vista: 780, parc: 990 },
   { nome: "Botox global (testa + glabela + olhos)", vista: 600, parc: 650 },
   { nome: "Botox gengival", vista: 300, parc: 350 },
+  { nome: "Remoção com hialuronidase", vista: 350, parc: 400 },
   { nome: "Combo: Lábio + Botox Global", vista: 1150, parc: 1250 },
   { nome: "Harmonização Natural (1ml + Botox)", vista: 1050, parc: 1150 },
   { nome: "Protocolo Avançado (3ml + Bioestimulador DIAMOND)", vista: 1950, parc: 2100 },
