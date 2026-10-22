@@ -1979,21 +1979,38 @@ function PatientFormModal({ initial, onClose, onSave }) {
 }
 
 // ---- Controle de estoque ---------------------------------------------------
-function UsarControl({ item, onUse }) {
+// Conta-se o que sobrou, nao o que foi usado: na pratica e isso que se faz na
+// bancada. O usado sai por diferenca (inicial - sobrou).
+function UsarControl({ item, onSobrou }) {
   const [v, setV] = useState("");
   const inputStyle = { background: C.bg, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 10px", fontSize: 14, color: C.ink, width: "100%" };
-  const n = Number(v) || 0;
-  const confirm = () => { if (n > 0) { onUse(item.id, n); setV(""); } };
+  const vazio = String(v).trim() === "";
+  const n = Math.max(0, Math.floor(Number(v) || 0));
+  const inicial = item.inicial != null ? item.inicial : item.qtd;
+  const usaria = Math.max(inicial - n, 0);
+  const demais = !vazio && n > inicial;
+  const ok = !vazio && !demais;
+  const confirm = () => { if (ok) { onSobrou(item.id, n); setV(""); } };
   return (
     <div>
-      <div className="text-xs mb-1" style={{ color: C.muted }}>Registrar uso</div>
+      <div className="text-xs mb-1" style={{ color: C.muted }}>Quantos sobraram</div>
       <div className="flex gap-1.5">
         <input inputMode="numeric" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") confirm(); }}
-               placeholder="qtd usada" style={inputStyle} className="flex-1" />
-        <button onClick={confirm} className="rounded-lg px-3 text-sm font-medium shrink-0 flex items-center gap-1" style={{ background: n > 0 ? C.ink : C.line, color: "#fff" }}>
+               placeholder="conte e digite" style={inputStyle} className="flex-1" />
+        <button onClick={confirm} className="rounded-lg px-3 text-sm font-medium shrink-0 flex items-center gap-1"
+                style={{ background: ok ? C.ink : C.line, color: "#fff" }}>
           <Check size={14} /> Confirmar
         </button>
       </div>
+      {demais ? (
+        <div className="text-xs mt-1" style={{ color: C.coral }}>
+          Não pode sobrar mais que o início ({inicial}).
+        </div>
+      ) : !vazio ? (
+        <div className="text-xs mt-1" style={{ color: C.muted }}>
+          Dá <b style={{ color: C.ink }}>{usaria}</b> {usaria === 1 ? "usado" : "usados"}.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2043,7 +2060,7 @@ function EstoqueView({ estoque, meses, onFecharMes, onApagarMes, mesAtivo, onSet
     const la = a.min > 0 && a.qtd <= a.min ? 0 : 1; const lb = b.min > 0 && b.qtd <= b.min ? 0 : 1;
     return la - lb || a.nome.localeCompare(b.nome);
   });
-  const handleUse = (id, n) => { const it = estoque.find((x) => x.id === id); if (it) onSet(id, it.qtd - n); };
+  const handleSobrou = (id, n) => onSet(id, n);
 
   return (
     <div className="ag-fade">
@@ -2177,7 +2194,7 @@ function EstoqueView({ estoque, meses, onFecharMes, onApagarMes, mesAtivo, onSet
                 </div>
                 <div className="flex items-end gap-3 mt-3">
                   <div className="flex-1 min-w-0">
-                    <UsarControl item={i} onUse={handleUse} />
+                    <UsarControl item={i} onSobrou={handleSobrou} />
                   </div>
                   <div className="rounded-xl px-4 py-2 text-center shrink-0" style={{ background: C.tealSoft, minWidth: 86 }}>
                     <div className="text-xs" style={{ color: C.teal }}>usados</div>
