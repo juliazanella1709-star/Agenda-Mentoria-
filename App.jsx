@@ -272,8 +272,9 @@ const humanAgo = (dateStr) => {
 // mudar o prazo ja arruma a tela junto.
 const RECALL = [
   { cat: "botox", label: "Botox", meses: 4, re: /botox/ },
+  { cat: "preench", label: "Preenchimento", meses: 5, re: /preenchimento/ },
   { cat: "bio", label: "Bioestimulador", meses: 6, re: /bioestimulador|radiesse|diamond/ },
-  { cat: "harmo", label: "Harmonização", meses: 6, re: /combo|harmoniza|protocolo|full face|preenchimento/ },
+  { cat: "harmo", label: "Harmonização", meses: 6, re: /combo|harmoniza|protocolo|full face/ },
 ];
 const chamarLabel = (chamarKey) => {
   const d = daysSince(chamarKey);
@@ -1735,6 +1736,24 @@ function PatientHistory({ name, items, onClose, onAgendar, onOpenConsulta }) {
   const totalPago = ativos.reduce((s, c) => s + recebidoDe(c), 0);
   const saldo = Math.max(totalFat - totalPago, 0);
 
+  // Por tipo de procedimento: quando foi o ultimo e quando chamar de volta.
+  const retornos = useMemo(() => {
+    const ultimos = {};
+    for (const it of ativos) {
+      const texto = procsText(it).toLowerCase();
+      for (const r of RECALL) {
+        if (!r.re.test(texto)) continue;
+        if (!ultimos[r.cat] || it.date > ultimos[r.cat].date) ultimos[r.cat] = { date: it.date, label: r.label, meses: r.meses };
+      }
+    }
+    return RECALL.filter((r) => ultimos[r.cat]).map((r) => {
+      const v = ultimos[r.cat];
+      const d = parseKey(v.date); d.setMonth(d.getMonth() + v.meses);
+      const chamarKey = keyOf(d);
+      return { cat: r.cat, label: v.label, meses: v.meses, date: v.date, chamarKey, overdue: daysSince(chamarKey) >= 0 };
+    }).sort((a, b) => a.chamarKey.localeCompare(b.chamarKey));
+  }, [ativos]);
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 55, background: "#26232a66", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div className="ag-pop ag-scroll ff-b" onClick={(e) => e.stopPropagation()}
@@ -1772,6 +1791,27 @@ function PatientHistory({ name, items, onClose, onAgendar, onOpenConsulta }) {
         <button onClick={() => onAgendar({ name, phone, instagram })} className="w-full text-sm rounded-xl py-2.5 font-semibold mb-4" style={{ background: C.ink, color: "#fff" }}>
           Agendar nova consulta
         </button>
+
+        {retornos.length > 0 && (
+          <>
+            <div className="text-xs font-medium mb-2" style={{ color: C.muted }}>QUANDO CHAMAR DE VOLTA</div>
+            <div className="rounded-xl mb-4" style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+              {retornos.map((r, i) => (
+                <div key={r.cat} className="px-3 py-2.5 flex items-center gap-3"
+                     style={{ borderTop: i === 0 ? "none" : `1px solid ${C.line}`, background: C.surface }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm" style={{ color: C.ink }}>{r.label} <span style={{ color: C.faint }}>· {r.meses} meses</span></div>
+                    <div className="text-xs" style={{ color: C.muted }}>último em {shortDate(r.date)}/{parseKey(r.date).getFullYear()}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="ff-d text-sm" style={{ fontWeight: 700, color: r.overdue ? C.coral : C.ink }}>{shortDate(r.chamarKey)}</div>
+                    <div className="text-xs" style={{ color: r.overdue ? C.coral : C.muted }}>{chamarLabel(r.chamarKey)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="text-xs font-medium mb-2" style={{ color: C.muted }}>HISTÓRICO</div>
         <div className="space-y-2">
