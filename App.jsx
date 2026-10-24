@@ -207,7 +207,7 @@ function derivePatients(items, people = []) {
       next: future.length ? future[0] : null,
       aReceber: Math.max(p.valor - p.pago, 0),
     };
-  }).sort((a, b) => (b.next ? 1 : 0) - (a.next ? 1 : 0) || a.name.localeCompare(b.name));
+  }).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
 }
 
 function billingForMonth(items, ym) {
@@ -456,6 +456,17 @@ export default function App() {
   // Salva o paciente no cadastro E leva o dado novo para as consultas dele. Sem
   // isso, corrigir um telefone aqui nao arrumaria o WhatsApp das abas que leem
   // da consulta (Chamar de volta, Retornos, agenda do dia).
+  // Excluir um paciente apaga tambem as consultas dele: so tirar do cadastro
+  // nao adianta, porque ele volta a aparecer derivado do historico.
+  const excluirPaciente = async (nome) => {
+    const chave = normNome(nome);
+    const nextPeople = (people || []).filter((p) => normNome(p.name) !== chave);
+    const nextItems = (items || []).filter((it) => normNome(it.patient) !== chave);
+    persistPeople(nextPeople);
+    setItems(nextItems);
+    try { await store.set(STORAGE_KEY, JSON.stringify(nextItems)); } catch (_) {}
+    flash("Cadastro excluído.");
+  };
   const savePerson = async (data) => {
     const nome = (data.name || "").trim();
     const chave = normNome(data.nomeOriginal || nome);
@@ -829,7 +840,8 @@ export default function App() {
         ) : view === "pacientes" ? (
           <PatientsView items={items} people={people} query={query} onAgendar={openNewFor} onHistory={openHistory}
                         mentoriaDatas={mentoriaDatas} onSaveMentoria={persistMentoria} onCadastrar={() => setPatientForm({})}
-                        onEditar={(p) => setPatientForm({ name: p.name, phone: p.phone || "", instagram: p.instagram || "", nomeOriginal: p.name })} />
+                        onEditar={(p) => setPatientForm({ name: p.name, phone: p.phone || "", instagram: p.instagram || "", nomeOriginal: p.name })}
+                        onExcluir={excluirPaciente} />
         ) : view === "retornos" ? (
           <RetornosView items={items} retornos={chamadas} onMarcar={marcarChamado}
                         onDesfazer={desfazerChamado} onAgendar={openNewFor} onHistory={openHistory} />
@@ -1111,7 +1123,8 @@ function BarraMentoria({ datas, onSave }) {
   );
 }
 
-function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar, onEditar, mentoriaDatas, onSaveMentoria }) {
+function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar, onEditar, onExcluir, mentoriaDatas, onSaveMentoria }) {
+  const [excluindo, setExcluindo] = useState(null);
   const patients = useMemo(() => derivePatients(items, people), [items, people]);
   const q = query.trim().toLowerCase();
   const list = q ? patients.filter((p) => p.name.toLowerCase().includes(q) || (p.phone || "").includes(q) || (p.instagram || "").toLowerCase().includes(q)) : patients;
@@ -1135,6 +1148,33 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar,
         </div>
       </div>
       <BarraMentoria datas={mentoriaDatas} onSave={onSaveMentoria} />
+
+      {excluindo && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 55, background: "#26232a66", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+             onClick={() => setExcluindo(null)}>
+          <div className="ag-pop ff-b" onClick={(e) => e.stopPropagation()}
+               style={{ background: C.surface, width: "100%", maxWidth: 420, borderRadius: 18, padding: 20 }}>
+            <div className="text-base font-medium mb-2" style={{ color: C.ink }}>Excluir {excluindo.name}?</div>
+            {excluindo.count > 0 ? (
+              <div className="text-sm" style={{ color: C.muted }}>
+                As <b style={{ color: C.ink }}>{excluindo.count} consulta(s)</b> dela também serão apagadas,
+                junto com o histórico financeiro{excluindo.aReceber > 0 ? <> (inclusive <b style={{ color: C.coral }}>{brl(excluindo.aReceber)}</b> a receber)</> : null}.
+              </div>
+            ) : (
+              <div className="text-sm" style={{ color: C.muted }}>Ela não tem consultas, então só o cadastro é removido.</div>
+            )}
+            <div className="text-xs mt-2 p-2.5 rounded-lg" style={{ background: C.coralSoft, color: C.coral }}>
+              Não dá para desfazer. Se é só para corrigir telefone ou nome, use “Editar dados”.
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setExcluindo(null)} className="flex-1 rounded-xl py-3 font-medium"
+                      style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>Cancelar</button>
+              <button onClick={() => { onExcluir(excluindo.name); setExcluindo(null); }}
+                      className="flex-1 rounded-xl py-3 font-medium" style={{ background: C.coral, color: "#fff" }}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))" }}>
         {list.map((p) => (
@@ -1164,10 +1204,16 @@ function PatientsView({ items, people, query, onAgendar, onHistory, onCadastrar,
               <button onClick={() => onHistory(p.name)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.tealSoft, color: C.teal }}>Histórico</button>
               <button onClick={() => onAgendar(p)} className="flex-1 text-xs rounded-lg py-2 font-medium" style={{ background: C.ink, color: "#fff" }}>Agendar</button>
             </div>
-            <button onClick={() => onEditar(p)} className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium flex items-center justify-center gap-1.5"
-                    style={{ background: C.bg, color: C.muted, border: `1px solid ${C.line}` }}>
-              <Pencil size={12} /> Editar dados
-            </button>
+            <div className="flex gap-1.5 mt-1.5">
+              <button onClick={() => onEditar(p)} className="flex-1 text-xs rounded-lg py-2 font-medium flex items-center justify-center gap-1.5"
+                      style={{ background: C.bg, color: C.muted, border: `1px solid ${C.line}` }}>
+                <Pencil size={12} /> Editar dados
+              </button>
+              <button onClick={() => setExcluindo(p)} className="text-xs rounded-lg px-3 py-2 font-medium shrink-0"
+                      style={{ background: C.bg, color: C.coral, border: `1px solid ${C.line}` }} aria-label="Excluir cadastro">
+                <Trash2 size={12} />
+              </button>
+            </div>
             {temTelefone(p.phone) && (
               <a href={waLink(p.phone, msgConvite(p.name, mentoriaDatas))} target="_blank" rel="noreferrer"
                  className="w-full text-xs rounded-lg py-2 mt-1.5 font-medium flex items-center justify-center gap-1.5"
