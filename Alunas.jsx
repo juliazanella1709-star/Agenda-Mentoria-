@@ -26,18 +26,28 @@ const CONTAS = ["Loan", "Mari"];
 
 // Cada aluna pode ter valores proprios; vazio significa "usa o padrao do curso".
 // Normaliza a aluna para o formulario: campo ausente vira "" para nao virar 0.
+const textoOuVazio = (v) => (v === 0 || v ? String(v) : "");
 const paraForm = (a) => ({
   ...a,
   telefone: a.telefone || "", obs: a.obs || "",
-  valorMatricula: a.valorMatricula === 0 || a.valorMatricula ? String(a.valorMatricula) : "",
-  valorCurso: a.valorCurso === 0 || a.valorCurso ? String(a.valorCurso) : "",
+  valorMatricula: textoOuVazio(a.valorMatricula),
+  valorParcelado: textoOuVazio(branco(a.valorParcelado) && a.modalidade !== "avista" ? a.valorCurso : a.valorParcelado),
+  valorAvista: textoOuVazio(branco(a.valorAvista) && a.modalidade === "avista" ? a.valorCurso : a.valorAvista),
   parcelas: a.parcelas ? String(a.parcelas) : "",
   matriculaData: a.matriculaData || "",
 });
 const branco = (v) => v === "" || v === null || v === undefined;
 const usa = (v, padrao) => (v === "" || v === null || v === undefined ? toNum(padrao) : toNum(v));
 const matriculaDe = (a, curso) => usa(a.valorMatricula, curso.matricula);
-const cursoDe = (a, curso) => usa(a.valorCurso, a.modalidade === "avista" ? curso.avista : curso.parcelado);
+// Cada aluna pode ter valor proprio para cada forma de pagamento. O valorCurso
+// antigo (um numero so) continua valendo como o valor da forma que ela usa, para
+// nao perder o que ja foi cadastrado.
+const cursoDe = (a, curso) => {
+  const avista = a.modalidade === "avista";
+  const proprio = avista ? a.valorAvista : a.valorParcelado;
+  const legado = branco(a.valorCurso) ? "" : a.valorCurso;
+  return usa(branco(proprio) ? legado : proprio, avista ? curso.avista : curso.parcelado);
+};
 const parcelasDe = (a, curso) => Math.max(1, parseInt(a.parcelas, 10) || parseInt(curso.maxParcelas, 10) || 1);
 const valorParcelaDe = (a, curso) => cursoDe(a, curso) / parcelasDe(a, curso);
 
@@ -81,7 +91,9 @@ export default function AlunasView({
       // testava === "", entao um campo undefined (aluna sem valor proprio)
       // virava toNum(undefined) = 0 e zerava a matricula ao editar.
       valorMatricula: branco(form.valorMatricula) ? "" : toNum(form.valorMatricula),
-      valorCurso: branco(form.valorCurso) ? "" : toNum(form.valorCurso),
+      valorParcelado: branco(form.valorParcelado) ? "" : toNum(form.valorParcelado),
+      valorAvista: branco(form.valorAvista) ? "" : toNum(form.valorAvista),
+      valorCurso: "",   // substituido pelos dois acima
       parcelas: branco(form.parcelas) ? "" : Math.max(1, parseInt(form.parcelas, 10) || 1),
     };
     const next = form.id
@@ -143,7 +155,7 @@ export default function AlunasView({
         </div>
 
         <button onClick={() => setForm({ nome: "", telefone: "", modalidade: "parcelado", obs: "", turmaId: turma.id,
-                                         matriculaPaga: false, matriculaData: "", valorMatricula: "", valorCurso: "", parcelas: "" })}
+                                         matriculaPaga: false, matriculaData: "", valorMatricula: "", valorParcelado: "", valorAvista: "", parcelas: "" })}
                 className="w-full rounded-2xl py-3 font-medium flex items-center justify-center gap-2 mb-4"
                 style={{ background: C.ink, color: "#fff" }}>
           <Plus size={17} /> Nova aluna nesta turma
@@ -330,20 +342,33 @@ function FormAluna({ form, setForm, salvar, curso, C, input }) {
         <div className="text-xs mb-2" style={{ color: C.muted }}>
           Valores desta aluna — deixe em branco para usar o padrão do curso
         </div>
+        <label className="block mb-2">
+          <div className="text-xs mb-1" style={{ color: C.muted }}>Matrícula (R$)</div>
+          <input inputMode="decimal" value={form.valorMatricula}
+                 onChange={(e) => setForm({ ...form, valorMatricula: e.target.value })}
+                 placeholder={String(curso.matricula)} style={{ ...input, background: C.surface }} />
+        </label>
         <div className="flex gap-2">
           <label className="flex-1">
-            <div className="text-xs mb-1" style={{ color: C.muted }}>Matrícula (R$)</div>
-            <input inputMode="decimal" value={form.valorMatricula}
-                   onChange={(e) => setForm({ ...form, valorMatricula: e.target.value })}
-                   placeholder={String(curso.matricula)} style={{ ...input, background: C.surface }} />
+            <div className="text-xs mb-1" style={{ color: form.modalidade === "avista" ? C.muted : C.ink }}>
+              Curso parcelado (R$)
+            </div>
+            <input inputMode="decimal" value={form.valorParcelado}
+                   onChange={(e) => setForm({ ...form, valorParcelado: e.target.value })}
+                   placeholder={String(curso.parcelado)} style={{ ...input, background: C.surface }} />
           </label>
           <label className="flex-1">
-            <div className="text-xs mb-1" style={{ color: C.muted }}>Curso (R$)</div>
-            <input inputMode="decimal" value={form.valorCurso}
-                   onChange={(e) => setForm({ ...form, valorCurso: e.target.value })}
-                   placeholder={String(form.modalidade === "avista" ? curso.avista : curso.parcelado)}
-                   style={{ ...input, background: C.surface }} />
+            <div className="text-xs mb-1" style={{ color: form.modalidade === "avista" ? C.ink : C.muted }}>
+              Curso à vista (R$)
+            </div>
+            <input inputMode="decimal" value={form.valorAvista}
+                   onChange={(e) => setForm({ ...form, valorAvista: e.target.value })}
+                   placeholder={String(curso.avista)} style={{ ...input, background: C.surface }} />
           </label>
+        </div>
+        <div className="text-xs mt-1.5" style={{ color: C.faint }}>
+          Vale o da forma escolhida acima — hoje, <b style={{ color: C.muted }}>
+            {form.modalidade === "avista" ? "à vista" : "parcelado"}</b>.
         </div>
         <div className="text-xs mt-2" style={{ color: C.muted }}>
           Total desta aluna: <b style={{ color: C.ink }}>{brl(totalDe(form, curso))}</b>
