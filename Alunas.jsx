@@ -25,6 +25,16 @@ const mesAtual = () => { const d = new Date(); return `${d.getFullYear()}-${pad(
 const CONTAS = ["Loan", "Mari"];
 
 // Cada aluna pode ter valores proprios; vazio significa "usa o padrao do curso".
+// Normaliza a aluna para o formulario: campo ausente vira "" para nao virar 0.
+const paraForm = (a) => ({
+  ...a,
+  telefone: a.telefone || "", obs: a.obs || "",
+  valorMatricula: a.valorMatricula === 0 || a.valorMatricula ? String(a.valorMatricula) : "",
+  valorCurso: a.valorCurso === 0 || a.valorCurso ? String(a.valorCurso) : "",
+  parcelas: a.parcelas ? String(a.parcelas) : "",
+  matriculaData: a.matriculaData || "",
+});
+const branco = (v) => v === "" || v === null || v === undefined;
 const usa = (v, padrao) => (v === "" || v === null || v === undefined ? toNum(padrao) : toNum(v));
 const matriculaDe = (a, curso) => usa(a.valorMatricula, curso.matricula);
 const cursoDe = (a, curso) => usa(a.valorCurso, a.modalidade === "avista" ? curso.avista : curso.parcelado);
@@ -67,9 +77,12 @@ export default function AlunasView({
       nome, telefone: form.telefone || "", modalidade: form.modalidade || "parcelado", obs: form.obs || "",
       turmaId: form.turmaId || turmaAberta || "",
       matriculaPaga: !!form.matriculaPaga, matriculaData: form.matriculaData || "",
-      valorMatricula: form.valorMatricula === "" ? "" : toNum(form.valorMatricula),
-      valorCurso: form.valorCurso === "" ? "" : toNum(form.valorCurso),
-      parcelas: form.parcelas === "" ? "" : Math.max(1, parseInt(form.parcelas, 10) || 1),
+      // Vazio tem que continuar vazio para cair no padrao do curso. Antes so
+      // testava === "", entao um campo undefined (aluna sem valor proprio)
+      // virava toNum(undefined) = 0 e zerava a matricula ao editar.
+      valorMatricula: branco(form.valorMatricula) ? "" : toNum(form.valorMatricula),
+      valorCurso: branco(form.valorCurso) ? "" : toNum(form.valorCurso),
+      parcelas: branco(form.parcelas) ? "" : Math.max(1, parseInt(form.parcelas, 10) || 1),
     };
     const next = form.id
       ? (alunas || []).map((a) => (a.id === form.id ? { ...a, ...base } : a))
@@ -97,9 +110,15 @@ export default function AlunasView({
   }
 
   if (alunaAberta) {
-    return <Detalhe aluna={alunaAberta} curso={curso} C={C} card={card} input={input}
-                    onVoltar={() => setAberta(null)}
-                    onSave={(next) => onSaveAlunas((alunas || []).map((a) => (a.id === next.id ? next : a)))} />;
+    return (
+      <>
+        <Detalhe aluna={alunaAberta} curso={curso} C={C} card={card} input={input}
+                 onVoltar={() => setAberta(null)}
+                 onEditar={() => setForm(paraForm(alunaAberta))}
+                 onSave={(next) => onSaveAlunas((alunas || []).map((a) => (a.id === next.id ? next : a)))} />
+        {form && <FormAluna form={form} setForm={setForm} salvar={salvarAluna} curso={curso} C={C} input={input} />}
+      </>
+    );
   }
 
   // ------------------------------------------------------ dentro de uma turma
@@ -138,7 +157,7 @@ export default function AlunasView({
 
         <div className="space-y-2">
           {lista.map((a) => <CartaoAluna key={a.id} a={a} curso={curso} C={C} card={card}
-                                         onAbrir={() => setAberta(a.id)} onEditar={() => setForm({ ...a })}
+                                         onAbrir={() => setAberta(a.id)} onEditar={() => setForm(paraForm(a))}
                                          onApagar={() => setApagar(a)} />)}
         </div>
 
@@ -410,7 +429,7 @@ function ConfirmaApagar({ aluna, onCancelar, onConfirmar, C }) {
 }
 
 // ------------------------------------------------------ detalhe de uma aluna
-function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
+function Detalhe({ aluna, curso, onVoltar, onEditar, onSave, C, card, input }) {
   const [pagForm, setPagForm] = useState(null);
   const total = totalDe(aluna, curso), pago = pagoDe(aluna, curso), saldo = saldoDe(aluna, curso);
   const pagamentos = [...(aluna.pagamentos || [])].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
@@ -447,6 +466,11 @@ function Detalhe({ aluna, curso, onVoltar, onSave, C, card, input }) {
           <Mini label="Pago" value={brl(pago)} C={C} cor={C.goodFg} />
           <Mini label="Falta" value={brl(saldo)} C={C} cor={saldo > 0 ? C.coral : C.muted} />
         </div>
+
+        <button onClick={onEditar} className="w-full text-xs rounded-lg py-2 mt-3 font-medium flex items-center justify-center gap-1.5"
+                style={{ background: C.bg, color: C.ink, border: `1px solid ${C.line}` }}>
+          <Pencil size={12} /> Editar valores e forma de pagamento
+        </button>
 
         <div className="text-xs mt-3" style={{ color: C.muted }}>
           Matrícula {brl(matriculaDe(aluna, curso))} + curso {brl(cursoDe(aluna, curso))}
